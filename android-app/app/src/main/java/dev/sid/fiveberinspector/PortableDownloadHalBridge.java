@@ -50,6 +50,7 @@ public final class PortableDownloadHalBridge implements AutoCloseable {
         FiveberReaderSelector.Target verified=FiveberReaderSelector.discover();
         if(!reader.equals(verified.reader) || !hash.equals(verified.identityHash))
             throw new SecurityException("Download card identity changed");
+        ReaderDescriptor.requireWritable(reader);
         hal=SystemHalAdapter.connect(reader);
         if(!hal.isCardPresent())
             throw new IllegalStateException("Removable eUICC is not present");

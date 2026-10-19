@@ -19,7 +19,7 @@ public final class PortableProfileLifecycle {
   shell();CardTransactionLock.acquire();try{
    pending=null;ProfileLifecycleGuard.Operation op;
    try{op=ProfileLifecycleGuard.Operation.valueOf(operation.toUpperCase(Locale.ROOT));}catch(Exception e){throw new SecurityException("Unsupported profile operation");}
-   FiveberReaderSelector.Target card=FiveberReaderSelector.discover();PhoneNativeLpac.listProfiles();
+   FiveberReaderSelector.Target card=FiveberReaderSelector.discover();ReaderDescriptor.requireWritable(card.reader);PhoneNativeLpac.listProfiles();
    List<CardProfileInventory.Entry> entries=CardProfileInventory.list();List<ProfileLifecycleGuard.Row> before=rows(entries);
    String digest=ProfileLifecycleGuard.fingerprint(before);
    if(expectedFingerprint!=null&&(!expectedFingerprint.equals(ProfileLifecycleGuard.selectionFingerprint(before))||expectedCard==null||!expectedCard.equals(card.identityHash)))throw new SecurityException("Card inventory changed since displayed selection; refresh required");

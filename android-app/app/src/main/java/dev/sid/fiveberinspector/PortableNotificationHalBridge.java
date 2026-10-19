@@ -11,6 +11,7 @@ final class PortableNotificationHalBridge implements AutoCloseable {
     if(Process.myUid()!=Process.SHELL_UID)throw new SecurityException("Shell identity required");
     FiveberReaderSelector.Target card=FiveberReaderSelector.discover();
     if(!reader.equals(card.reader)||!hash.equals(card.identityHash))throw new SecurityException("Notification card changed");
+    ReaderDescriptor.requireWritable(reader);
     hal=SystemHalAdapter.connect(reader);
     if(!hal.isCardPresent())throw new SecurityException("Card unavailable");
     channel=hal.openLogicalChannel(PortableDownloadHalBridge.unhex("A0000005591010FFFFFFFF8900000100"),(byte)0);

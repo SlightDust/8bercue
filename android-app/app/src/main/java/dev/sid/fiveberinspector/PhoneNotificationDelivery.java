@@ -101,7 +101,7 @@ public final class PhoneNotificationDelivery {
   public static synchronized JSONObject prepareCleanup() throws Exception {
     requireShell();pendingCleanup=null;CardTransactionLock.acquire();
     try {
-      FiveberReaderSelector.Target target=FiveberReaderSelector.discover();
+      FiveberReaderSelector.Target target=FiveberReaderSelector.discover();ReaderDescriptor.requireWritable(target.reader);
       if(!EnrolledWritePolicy.isAllowed(target.identityHash))throw new SecurityException("Card not enrolled for notification cleanup");
       List<CardProfileInventory.Entry> entries=CardProfileInventory.list();Properties selected=null;
       for(Properties record:journal().records())if(NotificationJournal.cleanup(record)&&target.identityHash.equals(record.getProperty("card")))selected=record;
@@ -119,7 +119,7 @@ public final class PhoneNotificationDelivery {
       CardTransactionLock.acquire();
     }
     try {
-      FiveberReaderSelector.Target target=FiveberReaderSelector.discover();
+      FiveberReaderSelector.Target target=FiveberReaderSelector.discover();ReaderDescriptor.requireWritable(target.reader);
       if(!plan.reader.equals(target.reader)||!plan.card.equals(target.identityHash)||!EnrolledWritePolicy.isAllowed(target.identityHash))throw new SecurityException("Cleanup card changed");
       List<CardProfileInventory.Entry> entries=CardProfileInventory.list();if(!plan.inventory.equals(fingerprint(entries)))throw new SecurityException("Profiles changed since cleanup preview");
       NotificationJournal journal=journal();Properties record=null;

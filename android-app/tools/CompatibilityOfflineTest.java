@@ -57,7 +57,67 @@ public final class CompatibilityOfflineTest {
   }
   public void closeChannel(int channel){closed++;}
  }
+
+ public static final class Request {
+  public String aid,callingPackage;public int slotIndex,portIndex,subId,p2,channel;public Object binder;
+ }
+ public static final class Result {
+  int status=1,channel=2;
+  public int getStatus(){return status;}public int getChannel(){return channel;}
+ }
+ public static final class Phone {
+  Request last;Result result=new Result();int frames,cla,command,p3;String data;boolean closed,closeOk=true;
+  public Result iccOpenLogicalChannel(Request request){last=request;return result;}
+  public String iccTransmitApduLogicalChannelByPort(int slot,int port,int channel,int cla,int command,int p1,int p2,int p3,String data){
+   check(slot==1&&port==0&&channel==2);frames++;this.cla=cla;this.command=command;this.p3=p3;this.data=data;return "9000";
+  }
+  public boolean iccCloseLogicalChannel(Request request){check(request.slotIndex==1&&request.portIndex==0&&request.channel==2);closed=true;return closeOk;}
+ }
+ static void telephonyTests()throws Exception{
+  byte[] canonical=java.util.HexFormat.of().parseHex(TelephonyChannelCodec.ISDR);
+  String encoded=TelephonyChannelCodec.aid(canonical);
+  check(Arrays.equals(canonical,java.util.HexFormat.of().parseHex(encoded)));
+  rejects(()->TelephonyChannelCodec.aid(new byte[]{0,0}));
+  rejects(()->TelephonyChannelCodec.unhex("900"));
+  rejects(()->TelephonyChannelCodec.unhex("90xz"));
+  check(Arrays.equals(ReaderDescriptor.telephonyIndices("telephony.1.0"),new int[]{1,0}));
+  rejects(()->ReaderDescriptor.telephonyIndices("telephony.8.0"));
+  rejects(()->ReaderDescriptor.telephonyIndices("telephony.1.-1"));
+  rejects(()->ReaderDescriptor.requireWritable("telephony.1.0"));
+  check(ReaderDescriptor.writable("SIM1")&&ReaderDescriptor.writable("omapi.SIM1"));
+  Phone phone=new Phone();Object token=new Object();
+  TelephonySecureElementTransport transport=new TelephonySecureElementTransport(phone,Phone.class,Request.class,1,0,token);
+  check(transport.openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0)==2);
+  check(phone.last.subId==-1&&phone.last.callingPackage.equals("com.android.shell")&&phone.last.binder==token);
+  check(phone.last.aid.equals("a0000005591010ffffffff8900000100"));
+  rejects(()->transport.openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0));
+  rejects(()->transport.transmit(new byte[]{(byte)0x82,(byte)0xE2,(byte)0x91,0,3,(byte)0xBF,0x31,0}));
+  check(phone.frames==0);
+  transport.transmit(new byte[]{(byte)0x82,(byte)0xE2,(byte)0x91,0,3,(byte)0xBF,0x2D,0});
+  check(phone.frames==1&&phone.cla==0x80&&phone.command==0xE2&&phone.p3==3&&phone.data.equals("bf2d00"));
+  rejects(()->transport.transmit(new byte[]{(byte)0x82,(byte)0xC0,0,0,0}));
+  rejects(()->transport.closeChannel(1));check(!phone.closed);
+  transport.closeChannel(2);check(phone.closed);rejects(()->transport.transmit(new byte[]{(byte)0x82,0,0,0,0}));
+  Phone closeDenied=new Phone();closeDenied.closeOk=false;
+  TelephonySecureElementTransport closeTransport=new TelephonySecureElementTransport(closeDenied,Phone.class,Request.class,1,0,token);
+  closeTransport.openLogicalChannel(canonical,(byte)0);
+  try{closeTransport.closeChannel(2);throw new AssertionError();}
+  catch(SecureElementFailure expected){check(expected.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED);}
+  Phone unavailable=new Phone();unavailable.result.status=3;
+  try{new TelephonySecureElementTransport(unavailable,Phone.class,Request.class,1,0,token).openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0);throw new AssertionError();}
+  catch(java.util.NoSuchElementException expected){check(!unavailable.closed);}
+  SystemHalAdapter.transports.clear();SystemHalAdapter.fallback.clear();
+  Card denied=new Card(1);denied.denied=true;SystemHalAdapter.transports.put("omapi.SIM1",denied);
+  SystemHalAdapter.fallback.put("telephony.1.0",new Card(1));
+  check(FiveberReaderSelector.discover().reader.equals("telephony.1.0"));
+  SystemHalAdapter.transports.clear();SystemHalAdapter.transports.put("SIM1",new Card(1));SystemHalAdapter.transports.put("SIM2",new Card(2));
+  int calls=SystemHalAdapter.fallbackCalls;
+  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.AMBIGUOUS_EUICC);}
+  check(SystemHalAdapter.fallbackCalls==calls);SystemHalAdapter.fallback.clear();SystemHalAdapter.transports.clear();
+ }
+
  public static void main(String[] args)throws Exception {
+  telephonyTests();
   check(ManagementAvailability.reason(33,new String[]{"arm64-v8a"}).isEmpty());
   check(ManagementAvailability.reason(36,new String[]{"arm64-v8a"}).isEmpty());
   check(!ManagementAvailability.reason(33,new String[]{"armeabi-v7a"}).isEmpty());

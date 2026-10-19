@@ -1,37 +1,41 @@
 # Device compatibility
 
-Installing the APK and accessing an eUICC are separate requirements. The APK's minimum SDK is 28 (Android 9), with ARM64 native components built for API 28. The compile/target SDK remains 36. This does not guarantee that a phone exposes a permitted card channel.
+Installing the APK and accessing an eUICC are separate requirements. Minimum SDK is 28 (Android 9), with ARM64 native components built for API 28. Compile/target SDK remains 36.
 
-The published `v0.18.0-beta.1` APK is version `0.18.0-rc1` / 22. Its management code rejects API levels below 36. This branch's unpublished `0.18.1-rc2` / 24 candidate removes that version gate and checks actual services and access instead. It is not a declaration of general Android 13 support.
+The published v0.18.0-beta.1 APK (0.18.0-rc1 / 22) rejects management below API 36. The unpublished 0.18.1-rc3 / 25 candidate checks actual capabilities instead and includes an **experimental, read-only Telephony fallback**. This is not general Android 13 qualification.
 
 ## Transports
 
-- Prefer the installed system Secure Element AIDL service when its instances are present. Interface classes come only from the trusted system SecureElement APK.
-- Otherwise use the framework OMAPI service, including on systems where that service talks to HIDL. System applet access rules still apply. The app does not initialize/reset the hardware HAL or replace the system service's callback.
-- OMAPI owns the physical channel; the existing APDU policies use virtual channel 1. Only the owned channel and session are closed. Global reader sessions are never closed.
-- Discovery, profile inventory, lifecycle, download and notification paths share this transport interface. Each caller retains its existing identity checks and APDU allowlist. Reader names include the transport namespace; switching transports does not silently reuse an existing selection.
+1. Prefer registered hardware AIDL instances using interface classes from the trusted system SecureElement APK.
+2. Otherwise try framework OMAPI, retaining its applet access rules.
+3. If no card was verified through that preferred backend, try the experimental Shell Telephony backend. Never hide an ambiguous selection or failed channel cleanup by falling back.
 
-ADB starts the Shell companion after **Connect using computer** is selected. Shizuku is optional. The connection lasts while that process remains alive; start it again after reboot, process termination or an app upgrade. Neither method grants permissions denied to Shell by the ROM.
+Every backend retains caller authentication, complete EID identity binding and bounded APDU policies. Reader names include the transport namespace. A backend change invalidates an existing management selection. No path initializes/resets the HAL or closes another client's channels.
 
-## Android 13 qualification: Xiaomi 2109119BC (mona)
+The fallback depends on an Android framework **security-check defect**: a case-sensitive comparison of the ISD-R hex string, despite case-insensitive interpretation of the encoded bytes. It uses the real Shell UID and package, with the existing MODIFY_PHONE_STATE permission. It does not impersonate the system LPA. A patched ROM may reject this path. See [rootless investigation](ROOTLESS_ANDROID13.md).
 
-Observed ROM: `V816.0.2.0.TKVCNXM`, Android 13 / API 33, ARM64. These results apply to this device/ROM, not every Android 13 phone.
+This backend is intentionally read-only. Write previews and mutation transports reject its reader namespace, and a final transport policy permits only GetEID, GetProfilesInfo, optional GetEuiccInfo2 and bounded conditional GET RESPONSE. Lifecycle changes, downloads and notification removal are blocked.
 
-| Channel | Read-only observation |
+## Actual Android 13 result
+
+Device: Xiaomi 2109119BC / mona, ROM V816.0.2.0.TKVCNXM, Android 13 / API 33, ARM64. Final tested APK: 0.18.1-rc3 / 25, SHA-256 97c465ab293eef85f5256d8c074b697f977ce71f8bd00a2d9e5148c97a267798.
+
+| Gate | Actual result |
 | --- | --- |
-| Hardware AIDL | Not registered; its interface classes are absent from the installed SecureElement APK. |
-| Hardware HIDL 1.0/1.1/1.2 | SIM1 and eSE1 are registered, and system interface classes exist. SELinux denies Shell `find` on `hal_secure_element_hwservice`. Direct HIDL is not used by this candidate. |
-| Framework OMAPI | Reader enumeration/presence works. Opening ISD-R is denied by the system access-control enforcer: `No ARF exists`. |
-| Telephony | Shell has `MODIFY_PHONE_STATE`; the ROM still rejects the correct ISD-R AID with `The calling package is not allowed to access ISD-R.` This was a diagnostic probe, not a runtime fallback. |
+| Same-signer installation and normal launch | Passed; app data and UID preserved. |
+| Normal computer connection | Passed, with one ADB bootstrap and no Shizuku. |
+| Complete card identity | GetEID verified before/after independent inventory. |
+| Profile list | 3 profiles, 1 enabled and 2 disabled, visible in normal UI. Native lpac/libeuicc and Java reads agreed on count, masked identifiers and states. |
+| Writes | None attempted; blocked in this experimental backend. |
+| Download / notification / deletion closure | Unverified. |
+| Other Android 13 phones or patched ROMs | Unverified. |
 
-The formally signed candidate APK SHA-256 is `cc513ef7da0a6c5107a876f25c302cb692b1f618a6486acbc2a5f79a58d6bb7e`. It was installed as a same-signer update and launched on this device. The normal **Connect using computer** flow completed the independent Binder handoff without Shizuku; the waiting sheet closed and the UI displayed the system-access denial. The candidate's bundled native `lpac version` command returned `2.3.0` on the phone with stdio drivers and no card broker or HTTP request. This only verifies native loading, not profile I/O.
+The earlier version 24 candidate could not read the card: HIDL lookup was denied by SELinux, OMAPI rejected ISD-R with No ARF exists, and the uppercase Telephony request was denied as non-LPA. Those observations remain valid; version 25 adds the separately verified encoding workaround.
 
-No profile inventory can currently be established through these authorized Shell channels on this ROM. A reader name or a present card is not verified eUICC identification. No profile mutation, activation-code consumption, notification removal, radio change or reboot is authorized by these diagnostic results.
+ADB starts the authenticated Shell companion after **Connect using computer** is selected. Shizuku is optional and was not installed or used in this test. Reconnect after reboot, app upgrade or companion termination. The phone's existing conservative recovery flag was preserved; successful reading is not permission to clear an unknown operation or enable writes.
 
-The public host regression suite covers adapter behavior, virtual channel isolation, denied/null opens and cleanup, full GetEID assembly and bounded continuation, ambiguous discovery, non-Shell rejection, read-only APDU policy, active-profile deletion rejection and protected-profile handling. It uses synthetic data and cannot qualify hardware. Run it with:
+Run the public synthetic regressions:
 
-```sh
-bash android-app/tools/run_compatibility_tests.sh
-```
+    bash android-app/tools/run_compatibility_tests.sh
 
-The delivery acceptance report binds build, installation, UI and access results to the candidate APK SHA-256 and the actual device. Successful writes, downloads, notifications and deletion remain unverified until separately authorized and observed. Previous Moto results do not qualify this candidate.
+They do not replace actual-device qualification. Old Moto or Beta results do not qualify this APK.

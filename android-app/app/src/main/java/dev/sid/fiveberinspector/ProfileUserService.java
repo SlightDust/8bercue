@@ -77,7 +77,7 @@ public final class ProfileUserService extends IProfileService.Stub {
             // Return the same authoritative order used by preview selection.
             java.util.List<CardProfileInventory.Entry> entries = CardProfileInventory.list();
             org.json.JSONArray profiles = new org.json.JSONArray();
-            boolean writeQualified=EnrolledWritePolicy.isAllowed(target.identityHash);
+            boolean writeQualified=ReaderDescriptor.writable(target.reader)&&EnrolledWritePolicy.isAllowed(target.identityHash);
             java.util.List<ProfileLifecycleGuard.Row> policyRows=PortableProfileLifecycle.rows(entries);
             for (CardProfileInventory.Entry entry : entries) {
                 String id = entry.iccid;
@@ -99,7 +99,8 @@ public final class ProfileUserService extends IProfileService.Stub {
             catch (SecurityException unsupportedMutationState) { /* Still display an empty/inactive card for recovery. */ }
             reply.put("profiles", profiles).put("count", profiles.length()).put("writeQualified",writeQualified);
             reply.put("shizuku","Shizuku".equals(transport));
-            reply.put("transport",transport+" UID2000 / HAL "+target.reader);
+            reply.put("transport",transport+" UID2000 / "+target.reader);
+            if(!ReaderDescriptor.writable(target.reader))reply.put("connectionNotice","Experimental read-only Telephony connection. Card changes are blocked.");
             Log.i("FiveberShizuku", "listProfiles success reader="+target.reader+" count="+reply.optInt("count",-1));
             reply.put("readOnly",true);
             return reply.toString();

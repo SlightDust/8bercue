@@ -65,6 +65,7 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
             throw new SecurityException("Device and card are not enrolled for writes");
         if(!expectedReader.equals(enrolled.reader)||!expectedHash.equals(enrolled.identityHash))
             throw new SecurityException("Card reader changed during transaction");
+        ReaderDescriptor.requireWritable(expectedReader);
         hal=SystemHalAdapter.connect(expectedReader);
         if(!hal.isCardPresent())
             throw new SecurityException("Card absent");

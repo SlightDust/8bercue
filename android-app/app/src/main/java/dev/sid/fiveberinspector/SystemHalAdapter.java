@@ -48,6 +48,14 @@ final class SystemHalAdapter {
   requireShell();
   if(!ReaderDescriptor.valid(reader))throw new SecurityException("Invalid reader");
   try {
+   if(reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX)) {
+    int[] address=ReaderDescriptor.telephonyIndices(reader);
+    Object phone=service("phone");
+    if(phone==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
+    String name="com.android.internal.telephony.ITelephony";
+    return new TelephonySecureElementTransport(asInterface(name,phone),Class.forName(name),
+     Class.forName("com.android.internal.telephony.IccLogicalChannelRequest"),address[0],address[1],new android.os.Binder());
+   }
    if(reader.startsWith(ReaderDescriptor.OMAPI_PREFIX)) {
     Object binder=service("secure_element");
     if(binder==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
@@ -79,6 +87,31 @@ final class SystemHalAdapter {
     throw new SecureElementFailure(SecureElementFailure.Reason.ACCESS_DENIED);
    throw error;
   }
+ }
+ static java.util.List<String> telephonyReaders()throws Exception {
+  requireShell();
+  java.util.List<String> readers=new java.util.ArrayList<>();
+  Object binder=service("phone");if(binder==null)return readers;
+  String name="com.android.internal.telephony.ITelephony";
+  Class<?> api=Class.forName(name),request=Class.forName("com.android.internal.telephony.IccLogicalChannelRequest");
+  api.getMethod("iccOpenLogicalChannel",request);
+  api.getMethod("iccTransmitApduLogicalChannelByPort",int.class,int.class,int.class,int.class,int.class,int.class,int.class,int.class,String.class);
+  Object phone=asInterface(name,binder);
+  Object[] slots=(Object[])api.getMethod("getUiccSlotsInfo",String.class).invoke(phone,"com.android.shell");
+  if(slots==null||slots.length>8)throw new SecurityException("Invalid slot inventory");
+  for(int slot=0;slot<slots.length;slot++){
+   Object info=slots[slot];if(info==null||(Integer)info.getClass().getMethod("getCardStateInfo").invoke(info)!=2)continue;
+   java.util.Collection<?> ports=(java.util.Collection<?>)info.getClass().getMethod("getPorts").invoke(info);
+   if(ports==null||ports.size()>8)throw new SecurityException("Invalid port inventory");
+   for(Object port:ports){
+    if(!(Boolean)port.getClass().getMethod("isActive").invoke(port))continue;
+    int index=(Integer)port.getClass().getMethod("getPortIndex").invoke(port);
+    String reader=ReaderDescriptor.TELEPHONY_PREFIX+slot+"."+index;ReaderDescriptor.telephonyIndices(reader);
+    if(readers.contains(reader))throw new SecurityException("Duplicate physical reader");
+    readers.add(reader);
+   }
+  }
+  return readers;
  }
  private SystemHalAdapter(){}
 }

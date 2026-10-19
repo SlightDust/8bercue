@@ -10,8 +10,8 @@ android {
         applicationId 'dev.sid.fiveberinspector'
         minSdk 28
         targetSdk 36
-        versionCode 24
-        versionName '0.18.1-rc2'
+        versionCode 25
+        versionName '0.18.1-rc3'
     }
 
     buildFeatures {

@@ -127,9 +127,23 @@ public final class FiveberReaderSelector {
     private static Target discoverInternal(boolean crossDeviceReadOnly) throws Exception {
         if(Process.myUid()!=Process.SHELL_UID)
             throw new SecurityException("Requires authorized ADB Shell UID2000");
+        SecureElementFailure primary;
+        try {return discoverReaders(SystemHalAdapter.readers());}
+        catch(SecureElementFailure error){
+            if(error.reason==SecureElementFailure.Reason.AMBIGUOUS_EUICC||error.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED)throw error;
+            primary=error;
+        }
+        // Never hide ambiguity or failed cleanup with an alternate backend.
+        try {
+            List<String> fallback=SystemHalAdapter.telephonyReaders();
+            if(!fallback.isEmpty())return discoverReaders(fallback);
+        } catch(ClassNotFoundException|NoSuchMethodException unavailable) { /* Unsupported system shape. */ }
+        throw primary;
+    }
+    private static Target discoverReaders(List<String> readers)throws Exception {
         List<Target> matches=new ArrayList<>();
         SecureElementFailure failure=null;
-        for(String reader:SystemHalAdapter.readers()) {
+        for(String reader:readers) {
             try {
                 Target found=inspectOne(reader);
                 if(found!=null)matches.add(found);

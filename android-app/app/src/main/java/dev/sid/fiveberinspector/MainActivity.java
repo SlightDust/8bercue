@@ -446,7 +446,7 @@ public final class MainActivity extends Activity {
           }
           inventory = r;
           statusPreservingOutcome(
-              "Card connected", "Enabled on card does not confirm cellular network registration.");
+              "Card connected", r.optString("connectionNotice", "Enabled on card does not confirm cellular network registration."));
           render();
         });
   }

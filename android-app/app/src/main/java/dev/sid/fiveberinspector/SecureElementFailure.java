@@ -4,7 +4,7 @@ package dev.sid.fiveberinspector;
 final class SecureElementFailure extends SecurityException {
     enum Reason {
         NO_SERVICE, SYSTEM_INTERFACE_UNAVAILABLE, ACCESS_DENIED, NO_READABLE_EUICC,
-        AMBIGUOUS_EUICC, CHANNEL_CLEANUP_FAILED
+        AMBIGUOUS_EUICC, CHANNEL_CLEANUP_FAILED, READ_ONLY_TRANSPORT
     }
     final Reason reason;
     SecureElementFailure(Reason reason) { super(reason.name()); this.reason = reason; }
@@ -26,6 +26,8 @@ final class SecureElementFailure extends SecurityException {
             return "More than one readable eUICC was found. Automatic card selection is blocked.";
         if (Reason.CHANNEL_CLEANUP_FAILED.name().equals(code))
             return "A card channel could not be closed. Stop and verify the card connection before continuing.";
+        if (Reason.READ_ONLY_TRANSPORT.name().equals(code))
+            return "This experimental connection supports reading only. Card changes are blocked.";
         return "";
     }
 }

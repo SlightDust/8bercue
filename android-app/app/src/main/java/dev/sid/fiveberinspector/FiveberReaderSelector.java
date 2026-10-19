@@ -1,9 +1,7 @@
 package dev.sid.fiveberinspector;
 
-import android.os.Build;
 import android.os.Process;
 import android.util.Log;
-import dalvik.system.PathClassLoader;
 import java.lang.reflect.InvocationTargetException;
 import java.security.MessageDigest;
 import java.util.Arrays;
@@ -11,10 +9,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/** Read-only dynamic AIDL reader discovery. Ambiguity never selects a default slot. */
+/** Read-only capability-based reader discovery. Ambiguity never selects a default slot. */
 public final class FiveberReaderSelector {
-    private static final String AIDL_PREFIX =
-        "android.hardware.secure_element.ISecureElement/";
     private static final String ISDR_AID = "A0000005591010FFFFFFFF8900000100";
     static boolean isKnownCardHash(String digest){return ReaderAdmission.known(digest);}
     static String knownCardLabel(String digest){return ReaderAdmission.label(digest);}
@@ -49,15 +45,14 @@ public final class FiveberReaderSelector {
             e=((InvocationTargetException)e).getTargetException();
         return e;
     }
-    private static byte[] readEid(Object hal,Class<?> api,int ch) throws Exception {
+    private static byte[] readEid(SecureElementTransport hal,int ch) throws Exception {
         byte[] cmd = new byte[5+GET_EID.length];
         cmd[0]=(byte)(0x80|ch);cmd[1]=(byte)0xE2;cmd[2]=(byte)0x91;
         cmd[3]=0;cmd[4]=(byte)GET_EID.length;
         System.arraycopy(GET_EID,0,cmd,5,GET_EID.length);
         java.io.ByteArrayOutputStream body=new java.io.ByteArrayOutputStream();
         for(int i=0;i<MAX_FRAMES;i++) {
-            byte[] reply=(byte[])api.getMethod("transmit",byte[].class)
-                .invoke(hal,(Object)cmd);
+            byte[] reply=hal.transmit(cmd);
             if(reply==null || reply.length<2 || body.size()+reply.length>MAX_RESPONSE_BYTES)
                 throw new SecurityException("Unexpected GetEID reply length");
             body.write(reply,0,reply.length-2);
@@ -79,27 +74,20 @@ public final class FiveberReaderSelector {
         byte[] h=MessageDigest.getInstance("SHA-256").digest(eid);
         return upperHex(h);
     }
-    private static Target inspectOne(Class<?> manager,Class<?> binderType,
-          Class<?> iface,Class<?> stub,String reader,String pinnedHash) {
-        Object hal=null;
+    private static Target inspectOne(String reader) throws Exception {
+        SecureElementTransport hal=null;
         int channel=-1;
         String phase="service_lookup";
         try {
-            Object binder=manager.getMethod("getService",String.class)
-                .invoke(null,AIDL_PREFIX+reader);
-            if(binder==null)return null;
+            hal=SystemHalAdapter.connect(reader);
             phase="card_presence";
-            hal=stub.getMethod("asInterface",binderType).invoke(null,binder);
-            boolean present=(Boolean)iface.getMethod("isCardPresent").invoke(hal);
-            if(!present)return null;
+            if(!hal.isCardPresent())return null;
             phase="open_channel";
-            Object opened=iface.getMethod("openLogicalChannel",byte[].class,byte.class)
-                .invoke(hal,fromHex(ISDR_AID),(byte)0);
-            channel=opened.getClass().getField("channelNumber").getInt(opened);
+            channel=hal.openLogicalChannel(fromHex(ISDR_AID),(byte)0);
             if(channel<1 || channel>3)
                 throw new SecurityException("Unexpected logical channel");
             phase="eid_read";
-            String digest=digestPrefix(readEid(hal,iface,channel));
+            String digest=digestPrefix(readEid(hal,channel));
             if(ReaderAdmission.accepts(digest))
                 return new Target(reader,digest);
             Log.w("EightberReaderPilot", "reader="+reader+" phase=invalid_eid_identity");
@@ -110,13 +98,18 @@ public final class FiveberReaderSelector {
             Throwable cause=unwrap(ignored);
             Log.w("EightberReaderPilot", "reader="+reader+
                 " phase="+phase+" error="+cause.getClass().getSimpleName());
+            SecureElementFailure failure=SecureElementFailure.find(ignored);
+            if(failure!=null)throw failure;
+            if(cause instanceof SecurityException && !"eid_read".equals(phase))
+                throw new SecureElementFailure(SecureElementFailure.Reason.ACCESS_DENIED);
+            if(cause instanceof ClassNotFoundException||cause instanceof NoSuchMethodException)
+                throw new SecureElementFailure(SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE);
             return null;
         }finally{
             if(channel>0 && hal!=null) {
-                try {iface.getMethod("closeChannel",byte.class)
-                    .invoke(hal,(byte)channel);}
+                try {hal.closeChannel(channel);}
                 catch(Throwable ignored) {
-                    throw new SecurityException("Reader channel cleanup failed");
+                    throw new SecureElementFailure(SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED);
                 }
             }
         }
@@ -134,24 +127,23 @@ public final class FiveberReaderSelector {
     private static Target discoverInternal(boolean crossDeviceReadOnly) throws Exception {
         if(Process.myUid()!=Process.SHELL_UID)
             throw new SecurityException("Requires authorized ADB Shell UID2000");
-        if(Build.VERSION.SDK_INT<36)throw new SecurityException("Unsupported Android build");
-        String expected=null; // Reader discovery does not authorize a mutation.
-        Class<?> manager=Class.forName("android.os.ServiceManager");
-        Class<?> binder=Class.forName("android.os.IBinder");
-        ClassLoader loader=new PathClassLoader(SystemHalAdapter.dexPath(),
-            FiveberReaderSelector.class.getClassLoader());
-        Class<?> iface=Class.forName(
-            "android.hardware.secure_element.ISecureElement",true,loader);
-        Class<?> stub=Class.forName(
-            "android.hardware.secure_element.ISecureElement$Stub",true,loader);
         List<Target> matches=new ArrayList<>();
-        String[] services=(String[])manager.getMethod("listServices").invoke(null);
-        for(String reader:ReaderDescriptor.instances(services)) {
-            Target found=inspectOne(manager,binder,iface,stub,reader,expected);
-            if(found!=null)matches.add(found);
+        SecureElementFailure failure=null;
+        for(String reader:SystemHalAdapter.readers()) {
+            try {
+                Target found=inspectOne(reader);
+                if(found!=null)matches.add(found);
+            } catch(SecureElementFailure denied) {
+                if(denied.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED)throw denied;
+                failure=denied;
+            }
         }
-        if(matches.size()!=1)
-            throw new SecurityException("Select exactly one readable eUICC; ambiguous selection is denied");
+        if(matches.size()>1)
+            throw new SecureElementFailure(SecureElementFailure.Reason.AMBIGUOUS_EUICC);
+        if(matches.isEmpty()) {
+            if(failure!=null)throw failure;
+            throw new SecureElementFailure(SecureElementFailure.Reason.NO_READABLE_EUICC);
+        }
         return matches.get(0);
     }
 

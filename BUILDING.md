@@ -1,6 +1,6 @@
 # Build the corresponding release source
 
-This is the exact main/release source for 8bercue 0.18.0-rc1, versionCode 22. Debug-only laboratory tools, private device records, activation credentials and signing keys are excluded; none are compiled into the release APK. This archive does not claim to include the private test workspace or its full debug test suite.
+This branch builds the unpublished 8bercue 0.18.1-rc2 compatibility candidate, versionCode 24. Debug-only laboratory tools, private device records, activation credentials and signing keys are excluded; none are compiled into the release APK. The public compatibility regressions run with `bash android-app/tools/run_compatibility_tests.sh`. The private laboratory suite is not included.
 
 Use the versions in release/toolchain.json. Set JAVA_HOME to JDK 17+, ANDROID_HOME to the SDK with platform 36 and NDK 27.3.13750724. The Gradle wrapper downloads its pinned distribution; Maven dependencies are resolved from the repositories in settings.gradle with dependency locks and verification metadata. An existing populated Gradle cache supports --offline.
 
@@ -10,4 +10,4 @@ To sign your own build, supply all four FIVEBER_RELEASE_KEYSTORE, FIVEBER_RELEAS
 
 Install your signed APK with `adb -s YOUR_DEVICE install path/to/app-release.apk`. Open the app, choose Connect using computer and run `python3 android-app/tools/bootstrap_companion.py --serial YOUR_DEVICE --adb /path/to/adb`. Review every device/profile selection before card operations. The companion requires authorized ADB access. No fixed card identity is required by this release.
 
-The SHA256.json manifest covers archive contents except itself. Source archives and license notices remain unmodified. See LICENSING.md, COPYING and android-app/third_party.
+The repository SHA256.json records the published Beta source snapshot. New candidate deliveries carry their own source checksums. Native source archives and license notices remain unmodified. See LICENSING.md, COPYING and android-app/third_party.

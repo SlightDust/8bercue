@@ -1,6 +1,5 @@
 package dev.sid.fiveberinspector;
 
-import android.os.Build;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
@@ -122,8 +121,6 @@ public final class PhoneNativeLpac {
     // This remains the READ-ONLY path. Mutating transactions separately require
     // an enrolled device/card pair, confirmation, and independent readback.
     FiveberReaderSelector.Target expected=FiveberReaderSelector.discover();
-    if(Build.VERSION.SDK_INT<36)
-      throw new SecurityException("Unexpected Android SDK");
     try {cardPreflight(expected);}
     catch(Exception ex){throw new StageException("preflight",ex);}
     AtomicReference<Process> child=new AtomicReference<>();

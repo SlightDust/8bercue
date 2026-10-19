@@ -1,7 +1,5 @@
 package dev.sid.fiveberinspector;
 
-import android.os.IBinder;
-import dalvik.system.PathClassLoader;
 import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -35,8 +33,7 @@ public final class NativeLpacReadOnlyBridge {
         this.allowCapabilities=false;
         this.knownCardForRead=knownCardForRead;
     }
-    private Object hal;
-    private Class<?> halType;
+    private SecureElementTransport hal;
     private String selectedReader;
     private int channel = -1, frames = 0, totalBytes = 0;
     private boolean querySent = false, continuation = false;
@@ -78,18 +75,8 @@ public final class NativeLpacReadOnlyBridge {
                 || !knownCardForRead.identityHash.equals(target.identityHash)))
             throw new SecurityException("Recognized card moved during read");
         selectedReader = target.reader;
-        Class<?> manager = Class.forName("android.os.ServiceManager");
-        Class<?> binderType = Class.forName("android.os.IBinder");
-        Object binder = manager.getMethod("getService", String.class)
-            .invoke(null, "android.hardware.secure_element.ISecureElement/"+selectedReader);
-        if (binder == null) throw new IllegalStateException("Pinned 5ber HAL reader unavailable");
-        ClassLoader loader = new PathClassLoader(
-            SystemHalAdapter.dexPath(),
-            NativeLpacReadOnlyBridge.class.getClassLoader());
-        halType = Class.forName("android.hardware.secure_element.ISecureElement", true, loader);
-        Class<?> stub = Class.forName("android.hardware.secure_element.ISecureElement$Stub", true, loader);
-        hal = stub.getMethod("asInterface", binderType).invoke(null, binder);
-        boolean present = (Boolean) halType.getMethod("isCardPresent").invoke(hal);
+        hal=SystemHalAdapter.connect(selectedReader);
+        boolean present=hal.isCardPresent();
         if (!present) throw new IllegalStateException("Pinned 5ber HAL reader unavailable");
     }
 
@@ -99,9 +86,9 @@ public final class NativeLpacReadOnlyBridge {
     }
 
     void close() {
-        if (channel > 0 && hal != null && halType != null) {
+        if (channel > 0 && hal != null) {
             try {
-                halType.getMethod("closeChannel", byte.class).invoke(hal, (byte)channel);
+                hal.closeChannel(channel);
                 System.err.println("AUDIT channel_close=success");
             } catch (Throwable err) {
                 System.err.println("SECURITY_WARNING channel_close_failed");
@@ -117,9 +104,7 @@ public final class NativeLpacReadOnlyBridge {
         if (!AID.equals(candidate)) throw new SecurityException("AID not in allowlist");
         if (channel >= 0) throw new IllegalStateException("duplicate open");
         ensureConnected();
-        Object openResult = halType.getMethod("openLogicalChannel", byte[].class, byte.class)
-            .invoke(hal, decode(AID), (byte) 0);
-        channel = openResult.getClass().getField("channelNumber").getInt(openResult);
+        channel = hal.openLogicalChannel(decode(AID), (byte) 0);
         if (channel < 1 || channel > 3)
             throw new IllegalStateException("unexpected logical channel number");
         policy = new CardReadApduPolicy(channel,allowCapabilities);
@@ -136,8 +121,7 @@ public final class NativeLpacReadOnlyBridge {
 
         // Default native engine remains EID/profile-only. Capability callers explicitly opt in.
         policy.authorize(apdu);
-        byte[] result = (byte[]) halType.getMethod("transmit", byte[].class)
-            .invoke(hal, (Object) apdu);
+        byte[] result = hal.transmit(apdu);
         if (result == null || result.length < 2 || result.length > 8192)
             throw new IllegalStateException("invalid HAL response length");
         policy.acceptResponse(result);

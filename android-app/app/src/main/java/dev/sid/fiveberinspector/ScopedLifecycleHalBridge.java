@@ -1,7 +1,6 @@
 package dev.sid.fiveberinspector;
 
 import android.os.Process;
-import dalvik.system.PathClassLoader;
 import org.json.JSONObject;
 
 import java.util.Arrays;
@@ -14,8 +13,7 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
     private final String expectedHash,nickname;
     private final ProfileLifecycleGuard.Operation operation;
     private final String expectedReader;
-    private Object hal;
-    private Class<?> api;
+    private SecureElementTransport hal;
     private int channel=-1;
     private boolean consumed;
     private boolean awaitingGetResponse;
@@ -67,18 +65,8 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
             throw new SecurityException("Device and card are not enrolled for writes");
         if(!expectedReader.equals(enrolled.reader)||!expectedHash.equals(enrolled.identityHash))
             throw new SecurityException("Card reader changed during transaction");
-        Class<?> manager=Class.forName("android.os.ServiceManager");
-        Class<?> binder=Class.forName("android.os.IBinder");
-        Object handle=manager.getMethod("getService",String.class)
-            .invoke(null,"android.hardware.secure_element.ISecureElement/"+expectedReader);
-        if(handle==null)throw new SecurityException("Missing enrolled card reader");
-        ClassLoader loader=new PathClassLoader(
-            SystemHalAdapter.dexPath(),
-            ScopedLifecycleHalBridge.class.getClassLoader());
-        api=Class.forName("android.hardware.secure_element.ISecureElement",true,loader);
-        Class<?> stub=Class.forName("android.hardware.secure_element.ISecureElement$Stub",true,loader);
-        hal=stub.getMethod("asInterface",binder).invoke(null,handle);
-        if(!(Boolean)api.getMethod("isCardPresent").invoke(hal))
+        hal=SystemHalAdapter.connect(expectedReader);
+        if(!hal.isCardPresent())
             throw new SecurityException("Card absent");
     }
     public JSONObject handle(JSONObject request)throws Exception {
@@ -93,9 +81,7 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
                 if(!AID.equals(param)||channel>0||consumed)
                     throw new SecurityException("Unexpected management applet");
                 connect();
-                Object opened=api.getMethod("openLogicalChannel",byte[].class,byte.class)
-                    .invoke(hal,hex(AID),(byte)0);
-                channel=opened.getClass().getField("channelNumber").getInt(opened);
+                channel=hal.openLogicalChannel(hex(AID),(byte)0);
                 if(channel<1||channel>3)throw new SecurityException("Bad logical channel");
                 return response(channel,null);
             case "transmit":
@@ -116,8 +102,7 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
                         !Arrays.equals(getResponse,actual))
                         throw new SecurityException("Unsolicited or malformed GET RESPONSE");
                 }
-                byte[] reply=(byte[])api.getMethod("transmit",byte[].class)
-                    .invoke(hal,(Object)actual);
+                byte[] reply=hal.transmit(actual);
                 if(reply==null||reply.length<2||reply.length>8192)
                     throw new SecurityException("Malformed card response");
                 awaitingGetResponse=(reply[reply.length-2]&255)==0x61;
@@ -133,8 +118,8 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
     }
     public boolean wasSubmitted() {return consumed;}
     @Override public void close() {
-        if(channel>0 && api!=null && hal!=null){
-            try {api.getMethod("closeChannel",byte.class).invoke(hal,(byte)channel);}
+        if(channel>0 && hal!=null){
+            try {hal.closeChannel(channel);}
             catch(Exception ignored){}
         }
         channel=-1;

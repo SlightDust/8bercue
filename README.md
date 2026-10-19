@@ -30,7 +30,9 @@ Manage profiles on compatible removable eUICC cards, including 5ber, from a clea
 
 ## Get started
 
-You need an **ARM64 Android 9+** device, a compatible eUICC card and **ADB or Shizuku** access.
+The APK installs on **ARM64 Android 9+**. Card management also requires a compatible eUICC and a system Secure Element channel that permits access to it. Android version and ADB access alone do not guarantee card access. See [device compatibility](docs/COMPATIBILITY.md).
+
+A computer with **ADB** can start the management connection; Shizuku is optional.
 
 1. Install the APK from [Releases](https://github.com/sidnvy/8bercue/releases).
 2. Open 8bercue and choose **Connect using computer**, or set up Shizuku in Settings.

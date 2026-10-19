@@ -114,9 +114,12 @@ public final class ProfileUserService extends IProfileService.Stub {
             // On some Shizuku versions RemoteException from the UserService
             // is swallowed by Binder and becomes a null String. Return a
             // structured, sensitive-data-free error envelope instead.
+            displayedFingerprint=null;displayedCard=null;displayedLifecycleFingerprint=null;
             try {
                 JSONObject diagnostic=new JSONObject().put("ok",false).put("stage",step)
                     .put("error",cause.getClass().getSimpleName());
+                SecureElementFailure access=SecureElementFailure.find(ex);
+                if(access!=null)diagnostic.put("capabilityError",access.reason.name());
                 if(cause instanceof PhoneNativeLpac.StageException)
                     diagnostic.put("phase",((PhoneNativeLpac.StageException)cause).phase);
                 return diagnostic.toString();
@@ -304,10 +307,13 @@ public final class ProfileUserService extends IProfileService.Stub {
     private static String safeOperationError(String phase,Throwable cause) {
         // Never return exception messages: some include APDUs/card data.
         try {
-            return new JSONObject().put("ok",false).put("phase",phase)
+            JSONObject reply=new JSONObject().put("ok",false).put("phase",phase)
                 .put("status", "execute".equals(phase) ? "unknown" : "not_started")
                 .put("reviewRequired", "execute".equals(phase))
-                .put("error",cause.getClass().getSimpleName()).toString();
+                .put("error",cause.getClass().getSimpleName());
+            SecureElementFailure access=SecureElementFailure.find(cause);
+            if(access!=null)reply.put("capabilityError",access.reason.name());
+            return reply.toString();
         }catch(Exception e){return "{}";}
     }
 

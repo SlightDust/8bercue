@@ -39,6 +39,7 @@ public final class MainActivity extends Activity {
   private final java.util.ArrayList<View> profilePanelControls = new java.util.ArrayList<>();
   private Dialog installResultDialog;
   private Dialog activeSheet;
+  private Dialog bootstrapSheet;
   private boolean showConfirmation;
   private String notificationStatus = "";
   private boolean notificationCleanupAvailable;
@@ -143,7 +144,7 @@ public final class MainActivity extends Activity {
           .putBoolean("companionV2StrictPilotMigrated", true).commit();
     }
     if (getPreferences(0).getBoolean("pending", false))
-      notice = "A previous operation needs verification. Open Settings → Verify card and recovery. "
+      notice = "Card and operation state need verification. Open Settings → Verify card and recovery. "
           + "Do not submit its activation code again.";
     serviceArgs = new Shizuku
                       .UserServiceArgs(
@@ -199,6 +200,7 @@ public final class MainActivity extends Activity {
         statusPreservingOutcome("Connection lost", "Start the computer connection again. Pending operations will not be repeated.");render();
       }),0);
       backend=service;directManagement=true;companionManagement=true;fallback=false;bound=true;binding=false;
+      if(bootstrapSheet!=null){bootstrapSheet.dismiss();bootstrapSheet=null;}
       status("Connected", "Checking card and recovery state…");render();checkRecovery();
     }catch(Exception unavailable){backend=null;bound=false;}
   }
@@ -213,6 +215,7 @@ public final class MainActivity extends Activity {
     Sheet help=new Sheet("Connect using your computer");
     help.copy("Connect and authorize this phone with Android platform tools. Within two minutes, run the supplied bootstrap_companion.py with this phone's serial. Keep 8bercue open. No card changes happen during connection.");
     help.copy("A new connection is needed after a reboot or app update. This connection uses no Shizuku.");
+    bootstrapSheet=help.dialog;
     help.button("Waiting for computer",false,help.dialog::dismiss);help.show();
   }
   private boolean useCompanion() {
@@ -435,9 +438,11 @@ public final class MainActivity extends Activity {
     run("Reading your eSIMs", false,
         () -> s != null ? new JSONObject(s.listProfiles()) : ShellCompanionClient.list(), r -> {
           if (!r.optBoolean("ok", true)) {
-            status(
-                "Card unavailable", "No verified inventory was returned. Reconnect and refresh.");
-            return;
+            inventory=new JSONObject();notificationCleanupAvailable=false;dismissProfilePanel();
+            String limitation=SecureElementFailure.message(r.optString("capabilityError", ""));
+            status("Card unavailable", limitation.isEmpty()
+                ? "No verified inventory was returned. Reconnect and refresh." : limitation);
+            render();return;
           }
           inventory = r;
           statusPreservingOutcome(
@@ -453,7 +458,10 @@ public final class MainActivity extends Activity {
       if (!r.optBoolean("ok", false)) {
         getPreferences(0).edit().putBoolean("pending", true).commit();
         inventory = new JSONObject();notificationCleanupAvailable = false;dismissProfilePanel();
-        status("Recovery state unavailable", "Changes are blocked until the safety record can be checked. Do not clear app data or repeat the previous operation.");
+        String limitation=SecureElementFailure.message(r.optString("capabilityError", ""));
+        status("Recovery state unavailable", limitation.isEmpty()
+            ? "Changes are blocked until the safety record can be checked. Do not clear app data or repeat the previous operation."
+            : limitation+" Changes remain blocked until card and recovery verification can complete.");
         render();return;
       }
       String priorNotificationMessage = NotificationPresentation.message(notificationStatus);
@@ -1349,7 +1357,7 @@ public final class MainActivity extends Activity {
     statusBox.setVisibility(screen != 0 && !running && !pending && notice.isEmpty() && (title.equals("Card connected") || title.equals("Check complete")) ? View.GONE : View.VISIBLE);
     statusBox.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
     statusTitle.setText(running ? OPERATIONS.title() : !notice.isEmpty() ? pending ? "Needs verification" : "Update" : title);
-    statusDetail.setText(running ? detail : !notice.isEmpty() ? notice : detail + (pending ? "\nA previous operation still needs verification. Use Settings → Verify card and recovery before further changes." : ""));
+    statusDetail.setText(running ? detail : !notice.isEmpty() ? notice : detail + (pending ? "\nSafety verification is required. Use Settings → Verify card and recovery before further changes." : ""));
   }
   private void status(String a, String b) {
     notice = "";title = a;detail = b;updateStatusRegion();

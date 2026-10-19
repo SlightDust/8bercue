@@ -28,6 +28,14 @@ final class ReaderDescriptor {
   String[] fields=name.split("\\.");return new int[]{Integer.parseInt(fields[1]),Integer.parseInt(fields[2])};
  }
  static boolean writable(String name){return valid(name)&&!name.startsWith(TELEPHONY_PREFIX);}
+ static boolean lifecycleAllowed(String name,ProfileLifecycleGuard.Operation op,boolean enabled){
+  if(writable(name))return true;
+  try{telephonyIndices(name);return op==ProfileLifecycleGuard.Operation.RENAME&&!enabled;}
+  catch(SecurityException invalid){return false;}
+ }
+ static void requireLifecycle(String name,ProfileLifecycleGuard.Operation op,boolean enabled){
+  if(!lifecycleAllowed(name,op,enabled))throw new SecureElementFailure(SecureElementFailure.Reason.READ_ONLY_TRANSPORT);
+ }
  static void requireWritable(String name){if(!writable(name))throw new SecureElementFailure(SecureElementFailure.Reason.READ_ONLY_TRANSPORT);}
  private ReaderDescriptor(){}
 }

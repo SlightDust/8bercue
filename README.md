@@ -30,7 +30,7 @@ Manage profiles on compatible removable eUICC cards, including 5ber, from a clea
 
 ## Get started
 
-The APK installs on **ARM64 Android 9+**. Card management also requires a compatible eUICC and a system Secure Element channel that permits access to it. Android version and ADB access alone do not guarantee card access. See [device compatibility](docs/COMPATIBILITY.md).
+The APK installs on **ARM64 Android 9+**. Card management also requires a compatible eUICC and a system Secure Element channel that permits access to it. Android version and ADB access alone do not guarantee card access. Available management actions depend on the connection. See [device compatibility](docs/COMPATIBILITY.md).
 
 A computer with **ADB** can start the management connection; Shizuku is optional.
 

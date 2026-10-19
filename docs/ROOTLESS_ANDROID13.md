@@ -1,6 +1,6 @@
 # Rootless Android 13 investigation
 
-This record covers the owner-authorized, read-only investigation on 2109119BC / mona, Android 13 / API 33, V816.0.2.0.TKVCNXM. No root, ROM/security-policy changes, Shizuku, LPA identity impersonation, card writes or third-party APK installation were used.
+This record begins with the owner-authorized, read-only investigation on 2109119BC / mona, Android 13 / API 33, V816.0.2.0.TKVCNXM. No root, ROM/security-policy changes, Shizuku, LPA identity impersonation, card writes or third-party APK installation were used.
 
 ## Other managers
 
@@ -25,6 +25,14 @@ This is a policy-check workaround relying on a framework defect, not a new Andro
 
 The candidate applies this encoding only to the fixed ISD-R AID, while retaining com.android.shell as the real caller package. It inventories active physical slots/ports, verifies complete GetEID identity, refuses ambiguity, and uses independent readback paths.
 
-The fallback cannot issue profile changes: previews reject the reader, write bridges reject it, and its APDU policy independently rejects every non-allowlisted command. It offers no basic-channel, arbitrary SELECT, arbitrary AID or raw APDU RPC.
+Version 25 is strictly read-only. Version 26 adds a separately scoped, exact nickname-only transport for disabled profiles; all other mutations remain blocked. Neither version offers basic-channel, arbitrary SELECT, arbitrary AID or raw APDU RPC.
 
 The formally signed version 25 candidate was installed and connected through normal UI. It displayed three profiles; independent native/Java reads agreed on count, masked identifiers and states, with complete card identity stable before/after. No write outcome is claimed. Further write qualification requires explicit device/card/profile authorization and a separate implementation and test review.
+
+## Explicitly authorized nickname qualification: version 26
+
+The owner authorized only the disabled SMC profile (masked ICCID 8985...5339), with enabled povo and every other profile protected. The original nickname was empty; SMC was the provider label. Before writing, a read-only helper saved the full card identity and every profile field in a mode-0700 Shell-private directory with a mode-0600 snapshot. No raw identifiers were included in the public evidence.
+
+The formally signed 0.18.1-rc4 / 26 APK was installed with data and UID preserved. The normal UI prepared and confirmed SMC A13 test once, then independently verified it. A second normal UI preview explicitly removed that nickname, returning it to empty. Separate read-only checks compared the complete card identity, full identifiers, names, providers, nicknames and states: only the intended nickname changed in the intermediate snapshot, and the final snapshot matched the original exactly. Both fsynced transaction records are verified. Native libeuicc/lpac and independent Java inventory reads also passed on version 26.
+
+No activation code, enable/disable/delete command, download, notification cleanup, reboot or communication-setting change was submitted. ADB started the authenticated Shell companion; Shizuku was not used. Temporary UHID input drove the ordinary UI using existing Shell permissions and was closed after the test. This input method is separate from the Telephony applet access workaround.

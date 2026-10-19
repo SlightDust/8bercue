@@ -44,6 +44,16 @@ final class SystemHalAdapter {
    throw error;
   }
  }
+ static SecureElementTransport connectForLifecycle(String reader,ProfileLifecycleGuard.Operation op,String id,String nickname)throws Exception {
+  requireShell();
+  if(!reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX)){ReaderDescriptor.requireWritable(reader);return connect(reader);}
+  if(op!=ProfileLifecycleGuard.Operation.RENAME)throw new SecureElementFailure(SecureElementFailure.Reason.READ_ONLY_TRANSPORT);
+  int[] address=ReaderDescriptor.telephonyIndices(reader);
+  Object binder=service("phone");if(binder==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
+  String name="com.android.internal.telephony.ITelephony";
+  return new TelephonySecureElementTransport(asInterface(name,binder),Class.forName(name),
+   Class.forName("com.android.internal.telephony.IccLogicalChannelRequest"),address[0],address[1],new android.os.Binder(),id,nickname);
+ }
  static SecureElementTransport connect(String reader)throws Exception {
   requireShell();
   if(!ReaderDescriptor.valid(reader))throw new SecurityException("Invalid reader");

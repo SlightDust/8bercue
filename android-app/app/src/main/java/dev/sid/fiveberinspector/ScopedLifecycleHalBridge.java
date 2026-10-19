@@ -65,8 +65,12 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
             throw new SecurityException("Device and card are not enrolled for writes");
         if(!expectedReader.equals(enrolled.reader)||!expectedHash.equals(enrolled.identityHash))
             throw new SecurityException("Card reader changed during transaction");
-        ReaderDescriptor.requireWritable(expectedReader);
-        hal=SystemHalAdapter.connect(expectedReader);
+        if(expectedReader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX)) {
+            // Recheck disabled state and full target immediately before the mutation channel opens.
+            ProfileLifecycleGuard.Row selected=ProfileLifecycleGuard.selected(PortableProfileLifecycle.rows(CardProfileInventory.list()),target);
+            ReaderDescriptor.requireLifecycle(expectedReader,operation,selected.enabled);
+        } else ReaderDescriptor.requireWritable(expectedReader);
+        hal=SystemHalAdapter.connectForLifecycle(expectedReader,operation,target,nickname);
         if(!hal.isCardPresent())
             throw new SecurityException("Card absent");
     }
@@ -121,7 +125,7 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
     @Override public void close() {
         if(channel>0 && hal!=null){
             try {hal.closeChannel(channel);}
-            catch(Exception ignored){}
+            catch(Exception cleanupFailure){CardTransactionLock.quarantine();}
         }
         channel=-1;
     }

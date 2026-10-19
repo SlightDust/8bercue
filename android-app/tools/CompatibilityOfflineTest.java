@@ -66,12 +66,50 @@ public final class CompatibilityOfflineTest {
   public int getStatus(){return status;}public int getChannel(){return channel;}
  }
  public static final class Phone {
-  Request last;Result result=new Result();int frames,cla,command,p3;String data;boolean closed,closeOk=true;
+  Request last;Result result=new Result();int frames,cla,command,p3;String data;String reply="9000";boolean failSend,closed,closeOk=true;
   public Result iccOpenLogicalChannel(Request request){last=request;return result;}
   public String iccTransmitApduLogicalChannelByPort(int slot,int port,int channel,int cla,int command,int p1,int p2,int p3,String data){
-   check(slot==1&&port==0&&channel==2);frames++;this.cla=cla;this.command=command;this.p3=p3;this.data=data;return "9000";
+   check(slot==1&&port==0&&channel==2);frames++;this.cla=cla;this.command=command;this.p3=p3;this.data=data;if(failSend)throw new IllegalStateException("Synthetic lost result");return reply;
   }
   public boolean iccCloseLogicalChannel(Request request){check(request.slotIndex==1&&request.portIndex==0&&request.channel==2);closed=true;return closeOk;}
+ }
+ static void renameTests()throws Exception{
+  String id="8900000000000000001",other="8900000000000000002";
+  for(ProfileLifecycleGuard.Operation op:ProfileLifecycleGuard.Operation.values()){
+   check(ReaderDescriptor.lifecycleAllowed("telephony.1.0",op,false)==(op==ProfileLifecycleGuard.Operation.RENAME));
+   check(!ReaderDescriptor.lifecycleAllowed("telephony.1.0",op,true));
+  }
+  check(!ReaderDescriptor.lifecycleAllowed("telephony.8.0",ProfileLifecycleGuard.Operation.RENAME,false));
+  for(int channel=1;channel<=3;channel++){
+   final int c=channel;TelephonyRenamePolicy policy=new TelephonyRenamePolicy(id,"SMC test");
+   rejects(()->policy.authorize(ProfileLifecycleGuard.command(ProfileLifecycleGuard.Operation.RENAME,other,"SMC test",c),c));
+   rejects(()->policy.authorize(ProfileLifecycleGuard.command(ProfileLifecycleGuard.Operation.RENAME,id,"wrong",c),c));
+   for(ProfileLifecycleGuard.Operation op:ProfileLifecycleGuard.Operation.values())if(op!=ProfileLifecycleGuard.Operation.RENAME)
+    rejects(()->policy.authorize(ProfileLifecycleGuard.command(op,id,"",c),c));
+   byte[] exact=ProfileLifecycleGuard.command(ProfileLifecycleGuard.Operation.RENAME,id,"SMC test",c);
+   policy.authorize(exact,c);rejects(()->policy.authorize(exact,c));
+   policy.acceptResponse(new byte[]{0x61,2});
+   rejects(()->policy.authorize(new byte[]{(byte)(0x80|c),(byte)0xC0,0,0,3},c));
+   for(int i=0;i<6;i++){policy.authorize(new byte[]{(byte)(0x80|c),(byte)0xC0,0,0,2},c);policy.acceptResponse(new byte[]{0x61,2});}
+   rejects(()->policy.authorize(new byte[]{(byte)(0x80|c),(byte)0xC0,0,0,2},c));
+  }
+  Phone phone=new Phone();TelephonySecureElementTransport transport=new TelephonySecureElementTransport(phone,Phone.class,Request.class,1,0,new Object(),id,"SMC test");
+  byte[] aid=TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR);transport.openLogicalChannel(aid,(byte)0);
+  rejects(()->transport.transmit(ProfileLifecycleGuard.command(ProfileLifecycleGuard.Operation.DELETE,id,"",2)));check(phone.frames==0);
+  byte[] exact=ProfileLifecycleGuard.command(ProfileLifecycleGuard.Operation.RENAME,id,"SMC test",2);
+  transport.transmit(exact);check(phone.frames==1&&phone.cla==0x80&&phone.data.equals(TelephonyChannelCodec.hex(exact,5)));
+  rejects(()->transport.transmit(exact));check(phone.frames==1);transport.closeChannel(2);
+  rejects(()->transport.openLogicalChannel(aid,(byte)0));
+  Phone lost=new Phone();lost.failSend=true;TelephonySecureElementTransport uncertain=new TelephonySecureElementTransport(lost,Phone.class,Request.class,1,0,new Object(),id,"SMC test");
+  uncertain.openLogicalChannel(aid,(byte)0);
+  try{uncertain.transmit(exact);throw new AssertionError("Expected lost response");}catch(InvocationTargetException expected){check(lost.frames==1);}
+  rejects(()->uncertain.transmit(exact));check(lost.frames==1);uncertain.closeChannel(2);
+  List<ProfileLifecycleGuard.Row> before=List.of(new ProfileLifecycleGuard.Row(id,false,"SMC","S","N"),new ProfileLifecycleGuard.Row(other,true,"povo","K","N"));
+  List<ProfileLifecycleGuard.Row> renamed=List.of(new ProfileLifecycleGuard.Row(id,false,"SMC test","S","N"),before.get(1));
+  check(ProfileLifecycleGuard.exactTransition(ProfileLifecycleGuard.Operation.RENAME,before,renamed,id,"SMC test"));
+  check(ProfileLifecycleGuard.exactTransition(ProfileLifecycleGuard.Operation.RENAME,renamed,before,id,"SMC"));
+  for(ProfileLifecycleGuard.Row changed:List.of(new ProfileLifecycleGuard.Row(other,false,"povo","K","N"),new ProfileLifecycleGuard.Row(other,true,"changed","K","N"),new ProfileLifecycleGuard.Row(other,true,"povo","other","N")))
+   check(!ProfileLifecycleGuard.exactTransition(ProfileLifecycleGuard.Operation.RENAME,before,List.of(renamed.get(0),changed),id,"SMC test"));
  }
  static void telephonyTests()throws Exception{
   byte[] canonical=java.util.HexFormat.of().parseHex(TelephonyChannelCodec.ISDR);
@@ -117,7 +155,7 @@ public final class CompatibilityOfflineTest {
  }
 
  public static void main(String[] args)throws Exception {
-  telephonyTests();
+  telephonyTests();renameTests();
   check(ManagementAvailability.reason(33,new String[]{"arm64-v8a"}).isEmpty());
   check(ManagementAvailability.reason(36,new String[]{"arm64-v8a"}).isEmpty());
   check(!ManagementAvailability.reason(33,new String[]{"armeabi-v7a"}).isEmpty());

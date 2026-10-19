@@ -77,7 +77,7 @@ public final class ProfileUserService extends IProfileService.Stub {
             // Return the same authoritative order used by preview selection.
             java.util.List<CardProfileInventory.Entry> entries = CardProfileInventory.list();
             org.json.JSONArray profiles = new org.json.JSONArray();
-            boolean writeQualified=ReaderDescriptor.writable(target.reader)&&EnrolledWritePolicy.isAllowed(target.identityHash);
+            boolean writeQualified=EnrolledWritePolicy.isAllowed(target.identityHash);
             java.util.List<ProfileLifecycleGuard.Row> policyRows=PortableProfileLifecycle.rows(entries);
             for (CardProfileInventory.Entry entry : entries) {
                 String id = entry.iccid;
@@ -85,10 +85,10 @@ public final class ProfileUserService extends IProfileService.Stub {
                     .put("name", safeLabel(entry.name)).put("nickname", safeLabel(entry.nickname))
                     .put("state", entry.enabled ? "enabled" : "disabled")
                     .put("iccidMasked", id.substring(0,4) + "..." + id.substring(id.length()-4))
-                    .put("canRename",writeQualified&&allowed(target.identityHash,policyRows,entry,ProfileLifecycleGuard.Operation.RENAME))
-                    .put("canEnable",writeQualified&&allowed(target.identityHash,policyRows,entry,ProfileLifecycleGuard.Operation.ENABLE))
-                    .put("canDisable",writeQualified&&allowed(target.identityHash,policyRows,entry,ProfileLifecycleGuard.Operation.DISABLE))
-                    .put("canDelete",writeQualified&&allowed(target.identityHash,policyRows,entry,ProfileLifecycleGuard.Operation.DELETE)));
+                    .put("canRename",writeQualified&&ReaderDescriptor.lifecycleAllowed(target.reader,ProfileLifecycleGuard.Operation.RENAME,entry.enabled)&&allowed(target.identityHash,policyRows,entry,ProfileLifecycleGuard.Operation.RENAME))
+                    .put("canEnable",writeQualified&&ReaderDescriptor.lifecycleAllowed(target.reader,ProfileLifecycleGuard.Operation.ENABLE,entry.enabled)&&allowed(target.identityHash,policyRows,entry,ProfileLifecycleGuard.Operation.ENABLE))
+                    .put("canDisable",writeQualified&&ReaderDescriptor.lifecycleAllowed(target.reader,ProfileLifecycleGuard.Operation.DISABLE,entry.enabled)&&allowed(target.identityHash,policyRows,entry,ProfileLifecycleGuard.Operation.DISABLE))
+                    .put("canDelete",writeQualified&&ReaderDescriptor.lifecycleAllowed(target.reader,ProfileLifecycleGuard.Operation.DELETE,entry.enabled)&&allowed(target.identityHash,policyRows,entry,ProfileLifecycleGuard.Operation.DELETE)));
             }
             FiveberReaderSelector.Target finalCard=FiveberReaderSelector.discover();
             if(!target.identityHash.equals(finalCard.identityHash)||!target.reader.equals(finalCard.reader))throw new SecurityException("Card changed during inventory");
@@ -100,7 +100,7 @@ public final class ProfileUserService extends IProfileService.Stub {
             reply.put("profiles", profiles).put("count", profiles.length()).put("writeQualified",writeQualified);
             reply.put("shizuku","Shizuku".equals(transport));
             reply.put("transport",transport+" UID2000 / "+target.reader);
-            if(!ReaderDescriptor.writable(target.reader))reply.put("connectionNotice","Experimental read-only Telephony connection. Card changes are blocked.");
+            if(!ReaderDescriptor.writable(target.reader))reply.put("connectionNotice","Experimental Telephony connection: only disabled profile nicknames can be changed. Other card changes are blocked.");
             Log.i("FiveberShizuku", "listProfiles success reader="+target.reader+" count="+reply.optInt("count",-1));
             reply.put("readOnly",true);
             return reply.toString();

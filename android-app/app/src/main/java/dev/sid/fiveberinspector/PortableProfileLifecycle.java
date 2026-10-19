@@ -19,12 +19,12 @@ public final class PortableProfileLifecycle {
   shell();CardTransactionLock.acquire();try{
    pending=null;ProfileLifecycleGuard.Operation op;
    try{op=ProfileLifecycleGuard.Operation.valueOf(operation.toUpperCase(Locale.ROOT));}catch(Exception e){throw new SecurityException("Unsupported profile operation");}
-   FiveberReaderSelector.Target card=FiveberReaderSelector.discover();ReaderDescriptor.requireWritable(card.reader);PhoneNativeLpac.listProfiles();
+   FiveberReaderSelector.Target card=FiveberReaderSelector.discover();PhoneNativeLpac.listProfiles();
    List<CardProfileInventory.Entry> entries=CardProfileInventory.list();List<ProfileLifecycleGuard.Row> before=rows(entries);
    String digest=ProfileLifecycleGuard.fingerprint(before);
    if(expectedFingerprint!=null&&(!expectedFingerprint.equals(ProfileLifecycleGuard.selectionFingerprint(before))||expectedCard==null||!expectedCard.equals(card.identityHash)))throw new SecurityException("Card inventory changed since displayed selection; refresh required");
    if(index<0||index>=entries.size())throw new SecurityException("Profile selection out of bounds");
-   CardProfileInventory.Entry target=entries.get(index);ProfileLifecycleGuard.validate(op,before,target.iccid,nickname);LabSupport.validateMutation(card.identityHash,op,before,target.iccid);
+   CardProfileInventory.Entry target=entries.get(index);ReaderDescriptor.requireLifecycle(card.reader,op,target.enabled);ProfileLifecycleGuard.validate(op,before,target.iccid,nickname);LabSupport.validateMutation(card.identityHash,op,before,target.iccid);
    Plan p=new Plan();byte[] random=new byte[24];new java.security.SecureRandom().nextBytes(random);StringBuilder token=new StringBuilder();for(byte b:random)token.append(String.format(Locale.ROOT,"%02x",b&255));
    p.token=token.toString();p.reader=card.reader;p.hash=card.identityHash;p.identityHash=card.identityHash;p.digest=digest;p.id=target.iccid;p.nickname=op==ProfileLifecycleGuard.Operation.RENAME?nickname:"";p.op=op;p.created=android.os.SystemClock.elapsedRealtime();pending=p;
    String from="";for(CardProfileInventory.Entry e:entries)if(e.enabled)from=safe(e.provider+" / "+e.name);
@@ -46,6 +46,7 @@ public final class PortableProfileLifecycle {
    if(!qualified(p.hash))throw new SecurityException("Invalid card identity or local test scope does not permit this card");
    verifyIdentity(p);PhoneNativeLpac.listProfiles();List<ProfileLifecycleGuard.Row> before=rows(CardProfileInventory.list());
    if(!p.digest.equals(ProfileLifecycleGuard.fingerprint(before)))throw new SecurityException("Card changed since preview");
+   ReaderDescriptor.requireLifecycle(p.reader,p.op,ProfileLifecycleGuard.selected(before,p.id).enabled);
    ProfileLifecycleGuard.validate(p.op,before,p.id,p.nickname);LabSupport.validateMutation(p.identityHash,p.op,before,p.id);NativeLpacBundle.ensureInstalled();
    boolean nativeCompleted=false,verified=false,unchanged=false,restored=false,rollback=false;
    boolean[] submitted={false};

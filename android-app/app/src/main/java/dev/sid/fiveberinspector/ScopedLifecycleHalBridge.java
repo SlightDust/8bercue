@@ -69,6 +69,7 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
             // Recheck disabled state and full target immediately before the mutation channel opens.
             ProfileLifecycleGuard.Row selected=ProfileLifecycleGuard.selected(PortableProfileLifecycle.rows(CardProfileInventory.list()),target);
             ReaderDescriptor.requireLifecycle(expectedReader,operation,selected.enabled);
+            ShellOperationScope.validateMutation(expectedHash,operation,PortableProfileLifecycle.rows(CardProfileInventory.list()),target);
         } else ReaderDescriptor.requireWritable(expectedReader);
         hal=SystemHalAdapter.connectForLifecycle(expectedReader,operation,target,nickname);
         if(!hal.isCardPresent())

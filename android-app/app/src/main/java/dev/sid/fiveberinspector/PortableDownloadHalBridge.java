@@ -17,6 +17,8 @@ public final class PortableDownloadHalBridge implements AutoCloseable {
     private SecureElementTransport hal;
     private int channel = -1;
     private boolean connected;
+    private boolean cleanupFailed;
+    boolean cleanupFailed(){return cleanupFailed;}
 
     static byte[] unhex(String value) {
         if (value == null || (value.length() & 1) != 0 || value.length() > 1024)
@@ -51,7 +53,7 @@ public final class PortableDownloadHalBridge implements AutoCloseable {
         if(!reader.equals(verified.reader) || !hash.equals(verified.identityHash))
             throw new SecurityException("Download card identity changed");
         ReaderDescriptor.requireWritable(reader);
-        hal=SystemHalAdapter.connect(reader);
+        hal=SystemHalAdapter.connectForDownload(reader);
         if(!hal.isCardPresent())
             throw new IllegalStateException("Removable eUICC is not present");
         connected=true;
@@ -97,18 +99,19 @@ public final class PortableDownloadHalBridge implements AutoCloseable {
     public DownloadSessionPolicy.Stage stage() {return policy.stage();}
     public int installCommands() {return policy.installCommands();}
     public int frames() {return policy.commandFrames();}
-    public void bindTransaction(String id) {policy.bindTransaction(id);}
-    public void authorizeCancellationHttp(String id) {policy.authorizeCancellationHttp(id);}
-    public void authorizeHttp(String operation) {policy.authorizeHttp(operation);}
+    public void bindTransaction(String id) {policy.bindTransaction(id);if(hal instanceof TelephonySecureElementTransport)((TelephonySecureElementTransport)hal).bindDownloadTransaction(id);}
+    public void authorizeCancellationHttp(String id) {policy.authorizeCancellationHttp(id);if(hal instanceof TelephonySecureElementTransport)((TelephonySecureElementTransport)hal).authorizeCancellationHttp(id);}
+    public void authorizeHttp(String operation) {policy.authorizeHttp(operation);if(hal instanceof TelephonySecureElementTransport)((TelephonySecureElementTransport)hal).authorizeDownloadHttp(operation);}
     public void httpCompleted(String operation,int status) {
         policy.httpCompleted(operation,status);
+        if(hal instanceof TelephonySecureElementTransport)((TelephonySecureElementTransport)hal).downloadHttpCompleted(operation,status);
     }
     @Override public void close() {
         if(channel>0 && hal!=null) {
             try {
                 hal.closeChannel(channel);
             } catch(Exception ignored) {
-                // No response/log content containing card identifiers.
+                cleanupFailed=true; // Parent coordinator retains the lock and quarantines.
             }
         }
         channel=-1;connected=false;

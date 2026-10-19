@@ -564,7 +564,7 @@ public final class MainActivity extends Activity {
                     : op.equals("download")       ? s.executeDownload(token)
                                                   : s.executeOperation(token)),
         r -> {
-          if (op.equals("download")) {
+          if (r.has("notificationStatus")) {
             notificationStatus = r.optString("notificationStatus", "unavailable");
             notificationCleanupAvailable = r.optBoolean("notificationCleanupAvailable", false);
           }
@@ -596,7 +596,7 @@ public final class MainActivity extends Activity {
                     ? "Android has not confirmed the selected subscription yet. Check SIM settings before switching again."
                     : "Android subscription status could not be checked. Check SIM settings; network service is not verified.");
           }
-          if (op.equals("download") && verified && !review)
+          if (r.has("notificationStatus") && verified && !review)
             notice += "\n" + NotificationPresentation.message(notificationStatus);
           if (verified && !review)
             getPreferences(0).edit().remove("pending").commit();

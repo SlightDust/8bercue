@@ -61,9 +61,43 @@ public final class PhoneNotificationDelivery {
     } catch(JSONException impossible) {throw new IllegalStateException("Notification status unavailable");}
     return result;
   }
+  private static String approvedInstallHost(String card,String iccid)throws Exception {
+    String host=null;for(Properties record:journal().recordsForCard(card))if(hash(iccid).equals(record.getProperty("profile"))&&!record.containsKey("notificationOperation")&&"delivered".equals(NotificationJournal.outcome(record)))host=ActivationCode.validateHost(record.getProperty("host"));return host;
+  }
+  static Set<Long> beforeDeletion(String reader,String card,String iccid)throws Exception {
+    requireShell();if(approvedInstallHost(card,iccid)==null)return null;
+    Set<Long> sequences=new HashSet<>();for(NotificationMetadataInventory.Entry entry:NotificationMetadataInventory.list(reader,card))sequences.add(entry.sequence);return sequences;
+  }
+  static JSONObject afterDeletion(String reader,String card,String iccid,Set<Long> before){
+    if(before==null)return null;try{
+      Properties operation=new OperationJournal(new File("/data/local/tmp/fiveber-rescue-state")).read();
+      requireDeletionBinding(operation,card,iccid,"running");String host=approvedInstallHost(card,iccid);NotificationMetadataInventory.Entry selected=null;
+      for(NotificationMetadataInventory.Entry entry:NotificationMetadataInventory.list(reader,card))if(!before.contains(entry.sequence)&&entry.operation==0x10&&entry.iccid.equals(iccid)&&entry.host.equals(host)){if(selected!=null)throw new SecurityException("Ambiguous new deletion notification");selected=entry;}
+      if(selected==null)throw new SecurityException("No bound deletion notification");
+      return deliverDeletion(reader,card,iccid,host,operation.getProperty("txId"),selected.sequence);
+    }catch(Exception failure){return unavailable(card);}
+  }
+  private static void requireDeletionBinding(Properties operation,String card,String iccid,String phase)throws Exception {
+    requireShell();if(!CardTransactionLock.isActive()||!EnrolledWritePolicy.isAllowed(card)||!"2".equals(operation.getProperty("schema"))||!"delete".equals(operation.getProperty("operation"))||!phase.equals(operation.getProperty("status"))||!card.equals(operation.getProperty("card"))||!hash(iccid).equals(operation.getProperty("target")))throw new SecurityException("Deletion transaction binding required");
+  }
+  private static JSONObject deliverDeletion(String reader,String card,String iccid,String host,String transaction,long sequence)throws Exception {
+    Properties record=journal().beginDeletion(card,sequence,host,hash(iccid),transaction);return attempt(journal(),record,reader,card,iccid,false);
+  }
+  /** Operator repair of one previously verified deletion. Not exposed as a Binder/RPC method. */
+  static JSONObject recoverVerifiedDeletion(String reader,String card,String iccid,String transaction,long sequence)throws Exception {
+    requireShell();if(transaction==null||!transaction.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"))throw new SecurityException("Invalid deletion transaction");
+    java.nio.file.Path file=java.nio.file.Paths.get("/data/local/tmp/fiveber-rescue-state/history",transaction+".properties");
+    if(java.nio.file.Files.isSymbolicLink(file)||!java.nio.file.Files.isRegularFile(file,java.nio.file.LinkOption.NOFOLLOW_LINKS)||java.nio.file.Files.size(file)>4096)throw new SecurityException("Invalid deletion history");
+    Properties operation=new Properties();try(java.io.InputStream in=java.nio.file.Files.newInputStream(file,java.nio.file.LinkOption.NOFOLLOW_LINKS)){operation.load(in);}requireDeletionBinding(operation,card,iccid,"verified");
+    for(CardProfileInventory.Entry entry:CardProfileInventory.list())if(entry.iccid.equals(iccid))throw new SecurityException("Deleted profile still present");
+    String host=approvedInstallHost(card,iccid);if(host==null)throw new SecurityException("No prior approved install recipient");boolean found=false;
+    for(NotificationMetadataInventory.Entry entry:NotificationMetadataInventory.list(reader,card))if(entry.sequence==sequence&&entry.operation==0x10&&entry.iccid.equals(iccid)&&entry.host.equals(host))found=true;
+    if(!found)throw new SecurityException("Deletion notification not bound to approved asset");return deliverDeletion(reader,card,iccid,host,transaction,sequence);
+  }
   private static JSONObject attempt(NotificationJournal journal,Properties record,String reader,String card,String iccid,boolean cleanupOnly) throws Exception {
+    java.util.concurrent.atomic.AtomicBoolean unsafeChannel=new java.util.concurrent.atomic.AtomicBoolean();
     DownloadWorkerSupervisor.Outcome<Boolean> outcome=DownloadWorkerSupervisor.run(()->{
-      try(PortableNotificationHalBridge bridge=new PortableNotificationHalBridge(reader,card,Long.parseLong(record.getProperty("sequence")))) {
+      try(PortableNotificationHalBridge bridge=new PortableNotificationHalBridge(reader,card,Long.parseLong(record.getProperty("sequence")),unsafeChannel)) {
         NotificationTransaction.run(journal,record,iccid,new NotificationTransaction.Card(){
           public byte[] retrieve() throws Exception{return bridge.retrieve();}
           public byte[] remove() throws Exception{return bridge.removeAfterAcknowledgement();}
@@ -83,12 +117,12 @@ public final class PhoneNotificationDelivery {
         },cleanupOnly);return Boolean.TRUE;
       }
     },()->{},60_000L,5_000L);
-    if(!outcome.workerStopped)CardTransactionLock.quarantine();
+    if(!outcome.workerStopped||unsafeChannel.get())CardTransactionLock.quarantine();
     String durableOutcome="not_started";
     for(Properties saved:journal.records())if(record.getProperty("id").equals(saved.getProperty("id")))durableOutcome=NotificationJournal.outcome(saved);
     JSONObject result=status(card).put("notificationStatus",durableOutcome)
-        .put("notificationWorkerStopped",outcome.workerStopped);
-    if(!outcome.workerStopped)result.put("notificationReviewRequired",true).put("recoveryAction","restart_shizuku_then_refresh");
+        .put("notificationWorkerStopped",outcome.workerStopped&&!unsafeChannel.get());
+    if(!outcome.workerStopped||unsafeChannel.get())result.put("notificationReviewRequired",true).put("recoveryAction","restart_shizuku_then_refresh");
     return result;
   }
   private static String fingerprint(List<CardProfileInventory.Entry> entries) throws Exception {

@@ -27,6 +27,7 @@ final class NotificationJournal {
       catch(RuntimeException invalid){throw new IOException("Invalid notification metadata");}
       if(p.containsKey("transaction")&&(!p.getProperty("transaction").matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
           ||!p.getProperty("card").matches("[a-f0-9]{64}")))throw new IOException("Invalid notification transaction binding");
+      if(p.containsKey("notificationOperation")&&!p.getProperty("notificationOperation").equals("delete"))throw new IOException("Invalid notification operation binding");
       records.add(p);
     }
     records.sort(Comparator.comparingLong(p->Long.parseLong(p.getProperty("startedAt"))));return records;
@@ -45,7 +46,12 @@ final class NotificationJournal {
         ||!transaction.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"))throw new IOException("Complete card and transaction binding required");
     return beginInternal(card,sequence,host,profile,transaction);
   }
-  private Properties beginInternal(String card,long sequence,String host,String profile,String transaction) throws IOException {
+  synchronized Properties beginDeletion(String card,long sequence,String host,String profile,String transaction)throws IOException {
+    if(card==null||!card.matches("[a-f0-9]{64}")||transaction==null||!transaction.matches("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"))throw new IOException("Deletion binding required");
+    return beginInternal(card,sequence,host,profile,transaction,true);
+  }
+  private Properties beginInternal(String card,long sequence,String host,String profile,String transaction) throws IOException {return beginInternal(card,sequence,host,profile,transaction,false);}
+  private Properties beginInternal(String card,long sequence,String host,String profile,String transaction,boolean deletion) throws IOException {
     List<Properties> prior=records();if(prior.size()>=128)throw new IOException("Notification journal full");
     for(Properties p:prior)if(card.equals(p.getProperty("card"))&&Long.toString(sequence).equals(p.getProperty("sequence")))throw new IOException("Notification attempt already recorded");
     NotificationCodec.command(sequence,false);
@@ -53,6 +59,7 @@ final class NotificationJournal {
     Properties p=new Properties();p.setProperty("id",UUID.randomUUID().toString());p.setProperty("status","prepared");p.setProperty("card",card);p.setProperty("profile",profile);
     p.setProperty("sequence",Long.toString(sequence));p.setProperty("host",ActivationCode.validateHost(host));p.setProperty("startedAt",Long.toString(System.currentTimeMillis()));
     if(transaction!=null)p.setProperty("transaction",transaction);
+    if(deletion)p.setProperty("notificationOperation","delete");
     save(p);return p;
   }
   synchronized void advance(Properties p,String next) throws IOException {

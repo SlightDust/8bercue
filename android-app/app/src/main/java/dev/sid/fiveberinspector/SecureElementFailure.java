@@ -27,7 +27,7 @@ final class SecureElementFailure extends SecurityException {
         if (Reason.CHANNEL_CLEANUP_FAILED.name().equals(code))
             return "A card channel could not be closed. Stop and verify the card connection before continuing.";
         if (Reason.READ_ONLY_TRANSPORT.name().equals(code))
-            return "This operation is blocked on this experimental connection. Only disabled profile nicknames may be changed.";
+            return "This operation is unavailable on the selected card connection.";
         return "";
     }
 }

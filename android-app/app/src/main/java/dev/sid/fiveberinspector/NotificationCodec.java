@@ -57,11 +57,14 @@ final class NotificationCodec {
     final String host;final byte[] signedPayload;
     Pending(String host,byte[] signedPayload){this.host=host;this.signedPayload=signedPayload;}
   }
-  static Pending pending(byte[] response,long sequence,String expectedIccid,String approvedHost) {
+  static Pending pending(byte[] response,long sequence,String expectedIccid,String approvedHost) {return pending(response,sequence,expectedIccid,approvedHost,"install");}
+  static Pending pending(byte[] response,long sequence,String expectedIccid,String approvedHost,String operation) {
     Node list=root(response,0xBF2B).one(0xA0);
     List<Node> entries=list.children();
-    if(entries.size()!=1||entries.get(0).tag!=0xBF37)throw new SecurityException("Expected one installation notification");
-    Node signed=entries.get(0), metadata=signed.one(0xBF27).one(0xBF2F);
+    if(entries.size()!=1||(!operation.equals("install")&&!operation.equals("delete")))throw new SecurityException("Unexpected notification kind");
+    Node signed=entries.get(0),metadata;
+    if(operation.equals("install")){if(signed.tag!=0xbf37)throw new SecurityException("Expected installation notification");metadata=signed.one(0xbf27).one(0xbf2f);}
+    else{if(signed.tag!=0x30)throw new SecurityException("Expected signed deletion notification");metadata=signed.one(0xbf2f);byte[] bits=metadata.one(0x81).value();if(bits.length!=2||bits[0]<0||bits[0]>4||(bits[1]&255)!=0x10)throw new SecurityException("Notification is not a deletion");}
     if(number(metadata.one(0x80))!=sequence)throw new SecurityException("Notification sequence changed");
     byte[] digits=metadata.one(0x5A).value();StringBuilder id=new StringBuilder();
     for(int i=0;i<digits.length;i++) {int lo=digits[i]&15,hi=(digits[i]>>>4)&15;

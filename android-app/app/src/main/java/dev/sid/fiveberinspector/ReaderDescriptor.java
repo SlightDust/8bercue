@@ -27,12 +27,12 @@ final class ReaderDescriptor {
   if(name==null||!name.matches("telephony\\.[0-7]\\.[0-7]"))throw new SecurityException("Invalid physical slot/port");
   String[] fields=name.split("\\.");return new int[]{Integer.parseInt(fields[1]),Integer.parseInt(fields[2])};
  }
- static boolean writable(String name){return valid(name)&&!name.startsWith(TELEPHONY_PREFIX);}
- static boolean lifecycleAllowed(String name,ProfileLifecycleGuard.Operation op,boolean enabled){
-  if(writable(name))return true;
-  try{telephonyIndices(name);return op==ProfileLifecycleGuard.Operation.RENAME&&!enabled;}
-  catch(SecurityException invalid){return false;}
+ static boolean writable(String name){
+  if(!valid(name))return false;
+  if(name.startsWith(TELEPHONY_PREFIX))try{telephonyIndices(name);}catch(SecurityException invalid){return false;}
+  return true;
  }
+ static boolean lifecycleAllowed(String name,ProfileLifecycleGuard.Operation op,boolean enabled){return writable(name)&&op!=null;}
  static void requireLifecycle(String name,ProfileLifecycleGuard.Operation op,boolean enabled){
   if(!lifecycleAllowed(name,op,enabled))throw new SecureElementFailure(SecureElementFailure.Reason.READ_ONLY_TRANSPORT);
  }

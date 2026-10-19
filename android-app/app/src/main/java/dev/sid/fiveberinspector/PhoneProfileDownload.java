@@ -31,7 +31,7 @@ public final class PhoneProfileDownload {
         return b.toString();
     }
     private static JSONObject runNative(AtomicReference<Process> child, ActivationCode activation,
-            String confirmation, String reader, String hash, DownloadDiagnostics diagnostics) throws Exception {
+            String confirmation, String reader, String hash, DownloadDiagnostics diagnostics,java.util.concurrent.atomic.AtomicBoolean unsafeChannel) throws Exception {
         Process proc=null;
         PortableDownloadHalBridge bridge=null;
         String latestStage="launch";
@@ -154,7 +154,7 @@ public final class PhoneProfileDownload {
                 diagnostics.nativeStopped(stopped);
                 if(stopped)child.set(null);
             }
-            if(bridge!=null)bridge.close();
+            if(bridge!=null){bridge.close();if(bridge.cleanupFailed())unsafeChannel.set(true);}
         }
     }
     private static String readBoundedLine(BufferedReader reader) throws IOException {
@@ -176,11 +176,12 @@ public final class PhoneProfileDownload {
         NativeLpacBundle.ensureInstalled();
         AtomicReference<Process> child=new AtomicReference<>();
         DownloadDiagnostics diagnostics=new DownloadDiagnostics();
+        java.util.concurrent.atomic.AtomicBoolean unsafeChannel=new java.util.concurrent.atomic.AtomicBoolean();
         DownloadWorkerSupervisor.Outcome<JSONObject> outcome=DownloadWorkerSupervisor.run(
-            ()->runNative(child,activation,confirmation,reader,hash,diagnostics),
+            ()->runNative(child,activation,confirmation,reader,hash,diagnostics,unsafeChannel),
             ()->{Process proc=child.get();if(proc!=null)proc.destroyForcibly();},
             TIMEOUT_SECONDS*1000L,15_000L);
-        boolean stopped=outcome.workerStopped&&diagnostics.nativeStopped();
+        boolean stopped=outcome.workerStopped&&diagnostics.nativeStopped()&&!unsafeChannel.get();
         return new Outcome(outcome.result,stopped,diagnostics.snapshot(outcome.result!=null,stopped));
     }
 }

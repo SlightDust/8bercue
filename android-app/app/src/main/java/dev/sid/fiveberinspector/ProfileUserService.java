@@ -100,7 +100,7 @@ public final class ProfileUserService extends IProfileService.Stub {
             reply.put("profiles", profiles).put("count", profiles.length()).put("writeQualified",writeQualified);
             reply.put("shizuku","Shizuku".equals(transport));
             reply.put("transport",transport+" UID2000 / "+target.reader);
-            if(!ReaderDescriptor.writable(target.reader))reply.put("connectionNotice","Experimental Telephony connection: only disabled profile nicknames can be changed. Other card changes are blocked.");
+            if(target.reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX))reply.put("connectionNotice","Experimental Telephony connection. Each change requires confirmation and a fresh card check.");
             Log.i("FiveberShizuku", "listProfiles success reader="+target.reader+" count="+reply.optInt("count",-1));
             reply.put("readOnly",true);
             return reply.toString();
@@ -194,7 +194,7 @@ public final class ProfileUserService extends IProfileService.Stub {
         return DownloadGuard.fingerprint(rows);
     }
     private static boolean allowed(String card,java.util.List<ProfileLifecycleGuard.Row> before,CardProfileInventory.Entry entry,ProfileLifecycleGuard.Operation operation){
-        try {ProfileLifecycleGuard.validate(operation,before,entry.iccid,entry.nickname);LabSupport.validateMutation(card,operation,before,entry.iccid);return true;}
+        try {ProfileLifecycleGuard.validate(operation,before,entry.iccid,entry.nickname);LabSupport.validateMutation(card,operation,before,entry.iccid);ShellOperationScope.validateMutation(card,operation,before,entry.iccid);return true;}
         catch(Exception denied){return false;}
     }
     private static String safeLabel(String value) {

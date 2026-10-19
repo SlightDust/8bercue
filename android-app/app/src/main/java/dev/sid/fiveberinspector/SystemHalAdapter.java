@@ -47,12 +47,40 @@ final class SystemHalAdapter {
  static SecureElementTransport connectForLifecycle(String reader,ProfileLifecycleGuard.Operation op,String id,String nickname)throws Exception {
   requireShell();
   if(!reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX)){ReaderDescriptor.requireWritable(reader);return connect(reader);}
-  if(op!=ProfileLifecycleGuard.Operation.RENAME)throw new SecureElementFailure(SecureElementFailure.Reason.READ_ONLY_TRANSPORT);
+  if(op==null)throw new SecurityException("Operation required");
   int[] address=ReaderDescriptor.telephonyIndices(reader);
   Object binder=service("phone");if(binder==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
   String name="com.android.internal.telephony.ITelephony";
   return new TelephonySecureElementTransport(asInterface(name,binder),Class.forName(name),
-   Class.forName("com.android.internal.telephony.IccLogicalChannelRequest"),address[0],address[1],new android.os.Binder(),id,nickname);
+   Class.forName("com.android.internal.telephony.IccLogicalChannelRequest"),address[0],address[1],new android.os.Binder(),op,id,nickname);
+ }
+ static SecureElementTransport connectForDownload(String reader)throws Exception {
+  requireShell();ReaderDescriptor.requireWritable(reader);
+  if(!reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX))return connect(reader);
+  int[] address=ReaderDescriptor.telephonyIndices(reader);String name="com.android.internal.telephony.ITelephony";
+  Object binder=service("phone");if(binder==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
+  return new TelephonySecureElementTransport(asInterface(name,binder),Class.forName(name),Class.forName("com.android.internal.telephony.IccLogicalChannelRequest"),address[0],address[1],new android.os.Binder(),new DownloadSessionPolicy());
+ }
+ static SecureElementTransport connectForNotification(String reader,long sequence)throws Exception {
+  requireShell();ReaderDescriptor.requireWritable(reader);
+  if(!reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX))return connect(reader);
+  int[] address=ReaderDescriptor.telephonyIndices(reader);String name="com.android.internal.telephony.ITelephony";
+  Object binder=service("phone");if(binder==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
+  return new TelephonySecureElementTransport(asInterface(name,binder),Class.forName(name),Class.forName("com.android.internal.telephony.IccLogicalChannelRequest"),address[0],address[1],new android.os.Binder(),sequence);
+ }
+ static SecureElementTransport connectForNotificationRemoval(String reader,long sequence)throws Exception {
+  requireShell();ReaderDescriptor.requireWritable(reader);
+  if(!reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX))return connect(reader);
+  int[] address=ReaderDescriptor.telephonyIndices(reader);String name="com.android.internal.telephony.ITelephony";
+  Object binder=service("phone");if(binder==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
+  return new TelephonySecureElementTransport(asInterface(name,binder),Class.forName(name),Class.forName("com.android.internal.telephony.IccLogicalChannelRequest"),address[0],address[1],new android.os.Binder(),sequence,true);
+ }
+ static SecureElementTransport connectForNotificationMetadata(String reader)throws Exception {
+  requireShell();if(!ReaderDescriptor.valid(reader))throw new SecurityException("Invalid reader");
+  if(!reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX))return connect(reader);
+  int[] address=ReaderDescriptor.telephonyIndices(reader);String name="com.android.internal.telephony.ITelephony";
+  Object binder=service("phone");if(binder==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
+  return new TelephonySecureElementTransport(asInterface(name,binder),Class.forName(name),Class.forName("com.android.internal.telephony.IccLogicalChannelRequest"),address[0],address[1],new android.os.Binder(),true);
  }
  static SecureElementTransport connect(String reader)throws Exception {
   requireShell();

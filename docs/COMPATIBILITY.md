@@ -2,7 +2,7 @@
 
 Installing the APK and accessing an eUICC are separate requirements. Minimum SDK is 28 (Android 9), with ARM64 native components built for API 28. Compile/target SDK remains 36.
 
-The published v0.18.0-beta.1 APK (0.18.0-rc1 / 22) rejects management below API 36. The unpublished 0.18.1-rc4 / 26 candidate checks actual capabilities instead and includes an **experimental Telephony fallback with disabled-profile nickname changes**. This is not general Android 13 qualification.
+The published v0.18.0-beta.1 APK (0.18.0-rc1 / 22) rejects management below API 36. The unpublished 0.18.1-rc7 / 29 candidate checks actual capabilities instead and includes an **experimental Shell Telephony fallback with scoped management protocols**. This is not general Android 13 qualification.
 
 ## Transports
 
@@ -14,31 +14,38 @@ Every backend retains caller authentication, complete EID identity binding and b
 
 The fallback depends on an Android framework **security-check defect**: a case-sensitive comparison of the ISD-R hex string, despite case-insensitive interpretation of the encoded bytes. It uses the real Shell UID and package, with the existing MODIFY_PHONE_STATE permission. It does not impersonate the system LPA. A patched ROM may reject this path. See [rootless investigation](ROOTLESS_ANDROID13.md).
 
-Default Telephony channels remain read-only: GetEID, GetProfilesInfo, optional GetEuiccInfo2 and bounded conditional GET RESPONSE. A separate lifecycle connection accepts exactly one confirmed nickname command for one fully identified, disabled profile. The nickname command is consumed before the Binder call; an uncertain response cannot trigger a retry. Confirmation, full inventory binding, durable operation records and independent postflight checks remain in place. Enable, disable, delete, download and notification cleanup remain blocked, including at the final transport boundary. Failed mutation-channel cleanup quarantines further transactions.
+Default Telephony channels remain read-only: GetEID, GetProfilesInfo and optional GetEuiccInfo2. Dedicated channels enforce one exact confirmed lifecycle command, the existing staged ES10b download state machine, or a sequence-bound notification exchange. ListNotification is opt-in and read-only. Lost Binder replies poison that connection; no automatic mutation or HTTP retry is added.
 
-## Actual Android 13 result
+Caller authentication, one-use confirmation tokens, complete card identity, exact inventory binding, fsynced journals and independent postflight checks remain mandatory. An optional expiring Shell-owned owner scope can further restrict a session to its original inventory and one independently identified disposable profile. It grants no new permission and an invalid existing scope fails closed.
 
-Device: Xiaomi 2109119BC / mona, ROM V816.0.2.0.TKVCNXM, Android 13 / API 33, ARM64. Final tested APK: 0.18.1-rc4 / 26, SHA-256 c5e6fe33e4d696466b11a33f5c359799f5fda8997b6b3b388d4c17aa0c377b38.
+On this device, holding a notification read channel prevents opening a second usable ISD-R channel for identity verification. The candidate closes its owned read channel, re-identifies the complete card, then opens a dedicated acknowledged-removal channel. It never removes another client's channel. Cleanup failures are propagated to the parent coordinator and quarantine further writes.
 
-| Gate | Actual result |
+For profiles installed by this app with a delivered installation receipt, deletion now snapshots notification metadata before the write. After independently verified deletion, only a new deletion notification matching that complete profile identity, approved recipient and transaction may be posted once. Its sequence and kind are durably bound; removal follows operator acknowledgment. Profiles without a trusted installation receipt are not automatically assigned a notification recipient.
+
+## Actual Android 13 results
+
+Device: Xiaomi 2109119BC / mona, ROM V816.0.2.0.TKVCNXM, Android 13 / API 33, ARM64. ADB uses the local USB target only; no Shizuku, root, ROM/SELinux change, reboot or global communication-setting change was used.
+
+| APK | Results bound to that APK |
 | --- | --- |
-| Same-signer installation and normal launch | Passed; app data and UID preserved. |
-| Normal computer connection | Passed, with one ADB bootstrap and no Shizuku. |
-| Complete card identity | GetEID verified before/after independent inventory. |
-| Profile list | 3 profiles, 1 enabled and 2 disabled, visible in normal UI. Native lpac/libeuicc and Java reads agreed on count, masked identifiers and states. |
-| Writes | Normal UI renamed disabled SMC to SMC A13 test, then restored its original empty nickname. Both durable transactions are verified. Independent complete inventory comparison confirmed all original fields/states restored, povo enabled throughout and every other profile unchanged. |
-| Download / notification / deletion closure | Unverified. |
-| Other Android 13 phones or patched ROMs | Unverified. |
+| 0.18.1-rc4 / 26 | Same-signer install, launch, computer connection, complete card identity and independent native/Java inventory passed. Disabled SMC nickname was changed and restored to its original empty value; full original inventory restored, povo remained enabled. |
+| 0.18.1-rc5 / 27 | Public BetterRoaming installation passed: exactly one new disabled profile, original three unchanged. Operator acknowledged its installation notification; local cleanup exposed the single-channel incompatibility. Speedtest's public token was refused at AuthenticateClient. |
+| 0.18.1-rc6 / 28 | Recovered acknowledged installation-notification cleanup, then deleted only that disabled disposable profile and independently restored the original inventory. Repeated directory/official public entries were refused by the server; these are not Android API failures or successful installs. |
+| 0.18.1-rc7 / 29 | Completed a fresh public BetterRoaming install, temporary activation, povo restoration and disposable deletion through normal UI. Both installation and deletion notifications were acknowledged and removed locally. Full original inventory was restored and Android reported povo active. Also repaired the exact inherited deletion notification. See the [profile-cycle record](ANDROID13_PROFILE_CYCLE.md). |
 
-The earlier version 24 candidate could not read the card: HIDL lookup was denied by SELinux, OMAPI rejected ISD-R with No ARF exists, and the uppercase Telephony request was denied as non-LPA. Those observations remain valid; version 25 adds the separately verified encoding workaround.
+Network registration, mobile-data traffic, enable/disable notification delivery, standalone disable, reboot persistence and other ROMs remain unqualified. The successful public BetterRoaming entry is not evidence that arbitrary operator activation codes work.
 
-ADB starts the authenticated Shell companion after **Connect using computer** is selected. Shizuku is optional and was not installed or used in this test. Reconnect after reboot, app upgrade or companion termination. The existing recovery flag was cleared only through the normal read-only Verify card and recovery flow after its durable journal reported idle; no unknown transaction was discarded. MIUI denied SDK input injection, so temporary standard UHID touch/keyboard devices drove the normal UI without changing settings. They were removed after testing.
+Version 29 signed APK SHA-256: e83838ffc26ac1de0ea3ed7dd37f4a23590a0b17161a1681b37130e6e7d3e3b3. Same-signer upgrades preserve application data, UID and safety history. Earlier Moto/Beta results do not qualify this candidate.
 
-Run the public synthetic regressions:
+Server 8.2.6 / 3.8 means MatchingID refused. It does not prove the underlying campaign quota, code-consumption history, or general device eligibility. Refused attempts remain in original immutable history. After same-card/full-inventory readback and operator review, separate abandonment resolutions permit a different authorized test asset without declaring the old code unused. Do not blindly retry refused codes.
+
+Computer connection uses the normal Connect using computer challenge, then one authenticated ADB Shell companion bootstrap. Reconnect after reboot, app update or companion termination. MIUI denies SDK input injection; temporary standard UHID touch/keyboard devices can operate the normal UI with existing Shell permissions and no setting changes.
+
+Run the public synthetic compatibility and safety regressions:
 
     bash android-app/tools/run_compatibility_tests.sh
 
-They do not replace actual-device qualification. Old Moto or Beta results do not qualify this APK.
+These include protocol separation, unknown-result poisoning, one-channel notification cleanup, card-swap and cleanup-failure refusal, protected original assets and deletion-notification identity/recipient/operation binding. Synthetic passes do not qualify a live install, switch or network service.
 
 ## Version admission versus actual access
 

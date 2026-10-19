@@ -15,7 +15,7 @@ final class NotificationTransaction {
       if(cleanupOnly&&"removing".equals(record.getProperty("status"))&&NotificationCodec.absent(retrieved)) {
         journal.advance(record,"delivered");return;
       }
-      NotificationCodec.Pending pending=NotificationCodec.pending(retrieved,Long.parseLong(record.getProperty("sequence")),iccid,record.getProperty("host"));
+      NotificationCodec.Pending pending=NotificationCodec.pending(retrieved,Long.parseLong(record.getProperty("sequence")),iccid,record.getProperty("host"),record.getProperty("notificationOperation","install"));
       DownloadWorkerSupervisor.checkCancelled();
       if(!cleanupOnly) {
         journal.advance(record,"posting");

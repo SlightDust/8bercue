@@ -73,15 +73,132 @@ public final class CompatibilityOfflineTest {
   }
   public boolean iccCloseLogicalChannel(Request request){check(request.slotIndex==1&&request.portIndex==0&&request.channel==2);closed=true;return closeOk;}
  }
+ static byte[] concat(byte[]...arrays){java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();for(byte[] a:arrays)out.writeBytes(a);return out.toByteArray();}
+ static byte[] deletionMetadata(String id,long sequence,int operation,String host){return NotificationCodec.tlv(0xbf2f,concat(NotificationCodec.tlv(0x80,new byte[]{(byte)sequence}),NotificationCodec.tlv(0x81,new byte[]{4,(byte)operation}),NotificationCodec.tlv(0x5a,Arrays.copyOfRange(ProfileLifecycleGuard.command(ProfileLifecycleGuard.Operation.DELETE,id,"",1),10,20)),NotificationCodec.tlv(0x0c,host.getBytes(java.nio.charset.StandardCharsets.US_ASCII))));}
+ static byte[] deletionReply(String id,long sequence,int operation,String host){return NotificationCodec.tlv(0xbf2b,NotificationCodec.tlv(0xa0,NotificationCodec.tlv(0x30,deletionMetadata(id,sequence,operation,host))));}
+ static void deletionNotificationTests()throws Exception{
+  String id="8900000000000000001",other="8900000000000000002",host="example.test";byte[] reply=deletionReply(id,63,16,host);
+  NotificationCodec.Pending parsed=NotificationCodec.pending(reply,63,id,host,"delete");check(parsed.host.equals(host));
+  rejects(()->NotificationCodec.pending(reply,63,id,host));rejects(()->NotificationCodec.pending(reply,62,id,host,"delete"));rejects(()->NotificationCodec.pending(reply,63,other,host,"delete"));rejects(()->NotificationCodec.pending(reply,63,id,"another.test","delete"));rejects(()->NotificationCodec.pending(deletionReply(id,63,64,host),63,id,host,"delete"));
+  List<NotificationMetadataInventory.Entry> metadata=NotificationMetadataInventory.decode(NotificationCodec.tlv(0xbf28,NotificationCodec.tlv(0xa0,deletionMetadata(id,63,16,host))));check(metadata.size()==1&&metadata.get(0).sequence==63&&metadata.get(0).iccid.equals(id)&&metadata.get(0).operation==16&&metadata.get(0).host.equals(host));
+  rejects(()->NotificationMetadataInventory.decode(NotificationCodec.tlv(0xbf28,NotificationCodec.tlv(0xa0,concat(deletionMetadata(id,63,16,host),deletionMetadata(id,63,16,host))))));
+  byte[] list=tag(0xbf28);CardReadApduPolicy ordinary=new CardReadApduPolicy(2,false);rejects(()->ordinary.authorize(list));CardReadApduPolicy opted=new CardReadApduPolicy(2,false,true);opted.authorize(list);opted.acceptResponse(new byte[]{(byte)0x90,0});rejects(()->opted.authorize(command(NotificationCodec.command(63,true),2)));
+  java.nio.file.Path directory=java.nio.file.Files.createTempDirectory("notification-delete-test");
+  try{
+   NotificationJournal journal=new NotificationJournal(directory.toFile());String card="1".repeat(64),transaction="11111111-1111-4111-8111-111111111111";
+   Properties record=journal.beginDeletion(card,63,host,IntentDigests.of(id),transaction);check(record.getProperty("notificationOperation").equals("delete"));
+   int[] sent={0},removed={0};NotificationTransaction.Card io=new NotificationTransaction.Card(){public byte[] retrieve(){return reply;}public byte[] remove(){removed[0]++;return NotificationCodec.tlv(0xbf30,NotificationCodec.tlv(0x80,new byte[]{0}));}};
+   NotificationTransaction.run(journal,record,id,io,notification->{sent[0]++;return true;},false);check(sent[0]==1&&removed[0]==1&&NotificationJournal.outcome(journal.records().get(0)).equals("delivered"));
+   Properties unknown=journal.beginDeletion(card,64,host,IntentDigests.of(id),transaction);NotificationTransaction.Card unknownIo=new NotificationTransaction.Card(){public byte[] retrieve(){return deletionReply(id,64,16,host);}public byte[] remove(){throw new AssertionError("Removal before acknowledgment");}};
+   try{NotificationTransaction.run(journal,unknown,id,unknownIo,notification->{throw new java.io.IOException("Synthetic lost acknowledgment");},false);throw new AssertionError("Expected unknown delivery");}catch(java.io.IOException expected){check(NotificationJournal.outcome(unknown).equals("delivery_unknown"));}
+   rejects(()->NotificationTransaction.run(journal,unknown,id,unknownIo,notification->{throw new AssertionError("No HTTP repeat");},true));
+   Properties cleanup=journal.beginDeletion(card,65,host,IntentDigests.of(id),transaction);int[] attempts={0};NotificationTransaction.Card cleanupIo=new NotificationTransaction.Card(){public byte[] retrieve(){return deletionReply(id,65,16,host);}public byte[] remove(){if(attempts[0]++==0)throw new SecurityException("Synthetic interrupted cleanup");return NotificationCodec.tlv(0xbf30,NotificationCodec.tlv(0x80,new byte[]{0}));}};
+   rejects(()->NotificationTransaction.run(journal,cleanup,id,cleanupIo,notification->{sent[0]++;return true;},false));check(NotificationJournal.cleanup(cleanup));NotificationTransaction.run(journal,cleanup,id,cleanupIo,notification->{throw new AssertionError("No duplicate notification post");},true);check(NotificationJournal.outcome(cleanup).equals("delivered")&&sent[0]==2&&attempts[0]==2);
+  }finally{try(java.util.stream.Stream<java.nio.file.Path> files=java.nio.file.Files.walk(directory)){for(java.nio.file.Path file:files.sorted(Comparator.reverseOrder()).toList())java.nio.file.Files.delete(file);}}
+ }
+ static final class OneChannelSlot {
+  boolean busy;int identity=7,removals;List<String> events=new ArrayList<>();
+ }
+ static final class Session implements SecureElementTransport {
+  final OneChannelSlot slot;final String role;boolean failClose;
+  Session(OneChannelSlot slot,String role){this.slot=slot;this.role=role;}
+  public boolean isCardPresent(){return true;}
+  public int openLogicalChannel(byte[] aid,byte p2){if(slot.busy)throw new java.util.NoSuchElementException("One session only");slot.busy=true;slot.events.add(role+"-open");return 1;}
+  public byte[] transmit(byte[] cmd){
+   slot.events.add(role+"-send");
+   if(role.equals("identity")){byte[] body=new byte[23];System.arraycopy(new byte[]{(byte)0xbf,0x3e,0x12,0x5a,0x10},0,body,0,5);body[5]=(byte)slot.identity;body[21]=(byte)0x90;return body;}
+   if(role.equals("notification"))return new byte[]{(byte)0xbf,0x2b,2,(byte)0xa0,0,(byte)0x90,0};
+   check(Arrays.equals(cmd,command(NotificationCodec.command(62,true),1)));slot.removals++;return new byte[]{(byte)0xbf,0x30,3,(byte)0x80,1,0,(byte)0x90,0};
+  }
+  public void closeChannel(int channel){slot.events.add(role+"-close");if(failClose)throw new SecurityException("Synthetic close failure");slot.busy=false;}
+ }
+ static void singleChannelNotificationTests()throws Exception{
+  for(int scenario=0;scenario<3;scenario++){
+   OneChannelSlot slot=new OneChannelSlot();Session identity=new Session(slot,"identity"),read=new Session(slot,"notification"),remove=new Session(slot,"removal");
+   SystemHalAdapter.transports.clear();SystemHalAdapter.fallback.clear();SystemHalAdapter.transports.put("SIM1",identity);SystemHalAdapter.notification=read;SystemHalAdapter.removal=remove;
+   FiveberReaderSelector.Target card=FiveberReaderSelector.discover();java.util.concurrent.atomic.AtomicBoolean unsafe=new java.util.concurrent.atomic.AtomicBoolean();
+   try(PortableNotificationHalBridge bridge=new PortableNotificationHalBridge(card.reader,card.identityHash,62,unsafe)){
+    bridge.retrieve();check(slot.busy&&slot.removals==0);
+    if(scenario==1)slot.identity=8;
+    if(scenario==2)read.failClose=true;
+    if(scenario==0){check(NotificationCodec.removed(bridge.removeAfterAcknowledgement()));check(slot.removals==1);}
+    else rejects(()->bridge.removeAfterAcknowledgement());
+   }
+   if(scenario==0){check(!slot.busy&&!unsafe.get());int closed=slot.events.indexOf("notification-close"),opened=slot.events.indexOf("removal-open");check(closed>=0&&opened>closed&&slot.events.subList(closed+1,opened).contains("identity-open"));}
+   else check(slot.removals==0&&!slot.events.contains("removal-open"));
+   if(scenario==2)check(unsafe.get());
+  }
+  TelephonyNotificationPolicy removal=new TelephonyNotificationPolicy(62,true);
+  rejects(()->removal.authorize(command(NotificationCodec.command(62,false),2),2));
+  rejects(()->removal.authorize(command(NotificationCodec.command(63,true),2),2));
+  byte[] exact=command(NotificationCodec.command(62,true),2);removal.authorize(exact,2);rejects(()->removal.authorize(exact,2));
+  removal.acceptResponse(new byte[]{0x61,4});rejects(()->removal.authorize(new byte[]{(byte)0x82,(byte)0xc0,0,0,5},2));
+  removal.authorize(new byte[]{(byte)0x82,(byte)0xc0,0,0,4},2);removal.acceptResponse(new byte[]{(byte)0x90,0});rejects(()->removal.authorize(exact,2));
+ }
+ static byte[] command(byte[] body,int channel){byte[] a=new byte[body.length+5];a[0]=(byte)(0x80|channel);a[1]=(byte)0xe2;a[2]=(byte)0x91;a[4]=(byte)body.length;System.arraycopy(body,0,a,5,body.length);return a;}
+ static byte[] tag(int tag){return command(new byte[]{(byte)(tag>>8),(byte)tag,0},2);}
+ static TelephonySecureElementTransport downloading(Phone phone)throws Exception{
+  TelephonySecureElementTransport t=new TelephonySecureElementTransport(phone,Phone.class,Request.class,1,0,new Object(),new DownloadSessionPolicy());t.openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0);return t;
+ }
+ static void protocolTests()throws Exception{
+  String id="8900000000000000001";
+  for(ProfileLifecycleGuard.Operation op:ProfileLifecycleGuard.Operation.values()){
+   TelephonyLifecyclePolicy policy=new TelephonyLifecyclePolicy(op,id,"");
+   for(ProfileLifecycleGuard.Operation other:ProfileLifecycleGuard.Operation.values())if(other!=op)rejects(()->policy.authorize(ProfileLifecycleGuard.command(other,id,"",2),2));
+   byte[] exact=ProfileLifecycleGuard.command(op,id,"",2);policy.authorize(exact,2);policy.acceptResponse(new byte[]{(byte)0x90,0});rejects(()->policy.authorize(exact,2));
+  }
+  for(int forbidden:new int[]{0xbf31,0xbf32,0xbf33,0xbf29,0xbf30,0xbf2b,0xbf3e}){
+   Phone f=new Phone();TelephonySecureElementTransport t=downloading(f);rejects(()->t.transmit(tag(forbidden)));check(f.frames==0);t.closeChannel(2);
+  }
+  Phone f=new Phone();TelephonySecureElementTransport t=downloading(f);
+  f.reply="6104";t.transmit(tag(0xbf2e));
+  rejects(()->t.transmit(new byte[]{(byte)0x82,(byte)0xc0,0,0,3}));check(f.frames==1);
+  f.reply="9000";t.transmit(new byte[]{(byte)0x82,(byte)0xc0,0,0,4});t.transmit(tag(0xbf20));
+  t.authorizeDownloadHttp("initiateAuthentication");t.downloadHttpCompleted("initiateAuthentication",200);t.bindDownloadTransaction("abcd");
+  t.transmit(tag(0xbf38));t.authorizeDownloadHttp("authenticateClient");t.downloadHttpCompleted("authenticateClient",200);
+  t.transmit(tag(0xbf21));t.authorizeDownloadHttp("getBoundProfilePackage");t.downloadHttpCompleted("getBoundProfilePackage",200);
+  t.transmit(tag(0xbf36));check(f.frames==6);t.closeChannel(2);rejects(()->t.openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0));
+  Phone lost=new Phone();lost.failSend=true;TelephonySecureElementTransport uncertain=downloading(lost);
+  try{uncertain.transmit(tag(0xbf2e));throw new AssertionError("Expected lost Binder result");}catch(InvocationTargetException expected){check(lost.frames==1);}
+  rejects(()->uncertain.transmit(tag(0xbf2e)));check(lost.frames==1);uncertain.closeChannel(2);
+  Phone notify=new Phone();TelephonySecureElementTransport n=new TelephonySecureElementTransport(notify,Phone.class,Request.class,1,0,new Object(),19L);
+  n.openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0);
+  n.transmit(command(NotificationCodec.command(19,false),2));
+  rejects(()->n.transmit(command(NotificationCodec.command(19,true),2)));check(notify.frames==1);
+  n.acknowledgeNotification();n.transmit(command(NotificationCodec.command(19,true),2));check(notify.frames==2);
+  rejects(()->n.transmit(command(NotificationCodec.command(19,true),2)));n.closeChannel(2);
+ }
+ static void scopeTests()throws Exception{
+  String active="8900000000000000001",smc="8900000000000000002",test="8900000000000000003",foreign="8900000000000000004",card="1".repeat(64);
+  ProfileLifecycleGuard.Row povo=new ProfileLifecycleGuard.Row(active,true,"","povo","KDDI"),old=new ProfileLifecycleGuard.Row(smc,false,"","SMC","Name"),added=new ProfileLifecycleGuard.Row(test,false,"","Speedtest","Test");
+  List<ProfileLifecycleGuard.Row> baseline=List.of(povo,old),installed=List.of(povo,old,added);
+  Properties p=new Properties();p.setProperty("schema","1");p.setProperty("card",card);p.setProperty("active",IntentDigests.of(active));p.setProperty("activation",IntentDigests.of("public-code"));p.setProperty("baseline",IntentDigests.of(active)+","+IntentDigests.of(smc));p.setProperty("switchAllowed","true");
+  for(ProfileLifecycleGuard.Row row:baseline){String hash=IntentDigests.of(row.id);p.setProperty("meta."+hash,OwnerOperationScope.metadata(row));p.setProperty("state."+hash,Boolean.toString(row.enabled));}
+  OwnerOperationScope before=new OwnerOperationScope(p);before.download(card,baseline,"public-code");
+  rejects(()->before.download(card,baseline,"other-code"));rejects(()->before.download(card,installed,"public-code"));rejects(()->before.mutation(card,ProfileLifecycleGuard.Operation.DELETE,installed,test));
+  p.setProperty("disposable",IntentDigests.of(test));OwnerOperationScope scope=new OwnerOperationScope(p);
+  scope.mutation(card,ProfileLifecycleGuard.Operation.ENABLE,installed,test);scope.mutation(card,ProfileLifecycleGuard.Operation.DELETE,installed,test);
+  for(ProfileLifecycleGuard.Operation op:ProfileLifecycleGuard.Operation.values()){
+   rejects(()->scope.mutation(card,op,installed,active));rejects(()->scope.mutation(card,op,installed,smc));rejects(()->scope.mutation(card,op,installed,foreign));
+  }
+  List<ProfileLifecycleGuard.Row> switched=List.of(new ProfileLifecycleGuard.Row(active,false,"","povo","KDDI"),old,new ProfileLifecycleGuard.Row(test,true,"","Speedtest","Test"));
+  scope.mutation(card,ProfileLifecycleGuard.Operation.ENABLE,switched,active);
+  rejects(()->scope.mutation(card,ProfileLifecycleGuard.Operation.DELETE,switched,test));rejects(()->scope.mutation(card,ProfileLifecycleGuard.Operation.DISABLE,switched,test));
+  rejects(()->scope.mutation("2".repeat(64),ProfileLifecycleGuard.Operation.DELETE,installed,test));
+  rejects(()->scope.mutation(card,ProfileLifecycleGuard.Operation.DELETE,List.of(new ProfileLifecycleGuard.Row(active,true,"changed","povo","KDDI"),old,added),test));
+  rejects(()->scope.mutation(card,ProfileLifecycleGuard.Operation.DELETE,List.of(povo,old,added,new ProfileLifecycleGuard.Row(foreign,false,"","Other","Other")),test));
+  p.setProperty("switchAllowed","false");OwnerOperationScope protectedState=new OwnerOperationScope(p);rejects(()->protectedState.mutation(card,ProfileLifecycleGuard.Operation.ENABLE,installed,test));
+  p.setProperty("disposable",IntentDigests.of(active));rejects(()->new OwnerOperationScope(p));
+ }
  static void renameTests()throws Exception{
   String id="8900000000000000001",other="8900000000000000002";
   for(ProfileLifecycleGuard.Operation op:ProfileLifecycleGuard.Operation.values()){
-   check(ReaderDescriptor.lifecycleAllowed("telephony.1.0",op,false)==(op==ProfileLifecycleGuard.Operation.RENAME));
-   check(!ReaderDescriptor.lifecycleAllowed("telephony.1.0",op,true));
+   check(ReaderDescriptor.lifecycleAllowed("telephony.1.0",op,false));
+   check(ReaderDescriptor.lifecycleAllowed("telephony.1.0",op,true));
   }
   check(!ReaderDescriptor.lifecycleAllowed("telephony.8.0",ProfileLifecycleGuard.Operation.RENAME,false));
   for(int channel=1;channel<=3;channel++){
-   final int c=channel;TelephonyRenamePolicy policy=new TelephonyRenamePolicy(id,"SMC test");
+   final int c=channel;TelephonyLifecyclePolicy policy=new TelephonyLifecyclePolicy(ProfileLifecycleGuard.Operation.RENAME,id,"SMC test");
    rejects(()->policy.authorize(ProfileLifecycleGuard.command(ProfileLifecycleGuard.Operation.RENAME,other,"SMC test",c),c));
    rejects(()->policy.authorize(ProfileLifecycleGuard.command(ProfileLifecycleGuard.Operation.RENAME,id,"wrong",c),c));
    for(ProfileLifecycleGuard.Operation op:ProfileLifecycleGuard.Operation.values())if(op!=ProfileLifecycleGuard.Operation.RENAME)
@@ -121,7 +238,7 @@ public final class CompatibilityOfflineTest {
   check(Arrays.equals(ReaderDescriptor.telephonyIndices("telephony.1.0"),new int[]{1,0}));
   rejects(()->ReaderDescriptor.telephonyIndices("telephony.8.0"));
   rejects(()->ReaderDescriptor.telephonyIndices("telephony.1.-1"));
-  rejects(()->ReaderDescriptor.requireWritable("telephony.1.0"));
+  check(ReaderDescriptor.writable("telephony.1.0"));
   check(ReaderDescriptor.writable("SIM1")&&ReaderDescriptor.writable("omapi.SIM1"));
   Phone phone=new Phone();Object token=new Object();
   TelephonySecureElementTransport transport=new TelephonySecureElementTransport(phone,Phone.class,Request.class,1,0,token);
@@ -155,7 +272,7 @@ public final class CompatibilityOfflineTest {
  }
 
  public static void main(String[] args)throws Exception {
-  telephonyTests();renameTests();
+  telephonyTests();renameTests();protocolTests();scopeTests();singleChannelNotificationTests();deletionNotificationTests();
   check(ManagementAvailability.reason(33,new String[]{"arm64-v8a"}).isEmpty());
   check(ManagementAvailability.reason(36,new String[]{"arm64-v8a"}).isEmpty());
   check(!ManagementAvailability.reason(33,new String[]{"armeabi-v7a"}).isEmpty());

@@ -40,7 +40,7 @@ public final class PortableProfileDownload {
             pending=null;
             ActivationCode activation=ActivationCode.parse(raw);
             String secret=activation.confirmation(confirmation);
-            FiveberReaderSelector.Target card=FiveberReaderSelector.discover();ReaderDescriptor.requireWritable(card.reader);LabSupport.validateDownload(card.identityHash,PortableProfileLifecycle.rows(CardProfileInventory.list()));
+            FiveberReaderSelector.Target card=FiveberReaderSelector.discover();ReaderDescriptor.requireWritable(card.reader);LabSupport.validateDownload(card.identityHash,PortableProfileLifecycle.rows(CardProfileInventory.list()));ShellOperationScope.validateDownload(card.identityHash,PortableProfileLifecycle.rows(CardProfileInventory.list()),activation.nativeValue());
             PhoneNativeLpac.listProfiles();
             List<DownloadGuard.Row> before=rows(CardProfileInventory.list());
             String fingerprint=DownloadGuard.fingerprint(before);
@@ -75,7 +75,7 @@ public final class PortableProfileDownload {
         boolean safeToUnlock=true;
         try {
             if(!qualified(plan.hash))throw new SecurityException("Invalid card identity or local test scope does not permit this card");
-            FiveberReaderSelector.Target card=FiveberReaderSelector.discover();ReaderDescriptor.requireWritable(card.reader);LabSupport.validateDownload(card.identityHash,PortableProfileLifecycle.rows(CardProfileInventory.list()));
+            FiveberReaderSelector.Target card=FiveberReaderSelector.discover();ReaderDescriptor.requireWritable(card.reader);LabSupport.validateDownload(card.identityHash,PortableProfileLifecycle.rows(CardProfileInventory.list()));ShellOperationScope.validateDownload(card.identityHash,PortableProfileLifecycle.rows(CardProfileInventory.list()),plan.activation.nativeValue());
             if(!plan.reader.equals(card.reader) || !plan.hash.equals(card.identityHash) || !plan.identityHash.equals(card.identityHash))
                 throw new SecurityException("Card identity changed since preview");
             PhoneNativeLpac.listProfiles();

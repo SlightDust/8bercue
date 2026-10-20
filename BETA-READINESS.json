@@ -1,9 +1,9 @@
 {
   "channel": "beta",
-  "tag": "v0.19.1-beta.1",
-  "apkVersion": "0.19.1-beta.1",
-  "versionCode": 46,
-  "apkSha256": "a1810a8e113f2c5861a617c86766d63dee15dbbda38bd61b92d1124f43910fb4",
+  "tag": "v0.19.1-beta.2",
+  "apkVersion": "0.19.1-beta.2",
+  "versionCode": 47,
+  "apkSha256": "85bdd6d6129c2044a1a9f6032827ffc5386a910565d730a90e589708f0a52132",
   "signerCertificateSha256": "24aa7984b0d0977ff1e87b57beca91b2e36a05c04a5443f1a47aa23d90a6ef1c",
   "authorization": "Owner requested review, merge, publish then validate downloaded Release APK on 2026-10-20.",
   "status": "LIMITED_BETA_PUBLISHED_BEFORE_DEVICE_QUALIFICATION",
@@ -16,10 +16,11 @@
     "feedbackPrivacyContract": "PASS; structural contract",
     "approvedProductionSigner": "PASS",
     "sourceArchiveBuild": "See SOURCE-VERIFICATION.json",
-    "sameSignerUpgradeAndLaunch": "PENDING at publication; use downloaded APK46 only",
+    "sameSignerUpgradeAndLaunch": "PENDING at publication; use downloaded APK47 only",
     "authenticatedConnectionAndFreshRead": "PENDING at publication",
     "readOnlyRecoveryOriginalEvidenceUnchanged": "PENDING at publication",
-    "ChineseLanguageUI": "PENDING at publication"
+    "ChineseLanguageUI": "PENDING at publication",
+    "reconciliationComposition": "PASS: 4 assertions; fails on APK47 source, passes fixed method"
   },
   "exactBuildWritesTested": [],
   "profileWritesSubmitted": 0,
@@ -28,7 +29,7 @@
   "connectionAuthorization": "Explicit two-minute App-created window and one-use authenticated handoff retained",
   "deferredChecks": [
     "fresh install",
-    "Android 13 and other-ROM live qualification for APK46",
+    "Android 13 and other-ROM live qualification for APK47",
     "Android 9-12 language fallback",
     "download/notification/delete closure",
     "activation/deactivation and nickname changes",

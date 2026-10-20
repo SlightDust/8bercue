@@ -312,7 +312,10 @@ public final class ProfileUserService extends IProfileService.Stub {
         } catch (Throwable e) { return safeOperationError("recovery", e); }
     }
     @Override public synchronized String reconcileOperation() {
-        try (ServiceCaller.ShellCall caller = ServiceCaller.asShell()) {
+        // listProfiles owns its authenticated Shell scope. Keep this caller's
+        // Binder identity intact so it can enter that scope exactly once.
+        try {
+            ServiceCaller.requireApp();
             JSONObject inventory = new JSONObject(listProfiles());
             if (inventory.has("error") || !inventory.has("profiles")) return inventory.toString();
             // An inventory alone cannot prove the intent of a lost transaction.

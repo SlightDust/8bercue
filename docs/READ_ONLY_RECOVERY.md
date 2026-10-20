@@ -17,3 +17,5 @@ The current recovery scope restores observation only. It does not resolve the ea
 `bash android-app/tools/run_recovery_tests.sh` exercises worker identity, PID reuse, children/native workers, observed termination, process-table names containing spaces, malformed/symlink evidence, cross-process exclusion and preserved unknown journals. Provider tests cover explicit recovery windows, live Binder replacement rejection and single-use authenticated replacement.
 
 The owner requested publication before device verification. Version-46 device results are recorded against the downloaded Release APK after publication. Earlier candidates and other devices are not acceptance evidence for that APK.
+
+Beta 2 (47) fixes nested Shell scopes in the explicit Verify card and recovery entry. Beta 1 (46) successfully read the card but that entry still failed. APK47 live evidence must come from its published download.

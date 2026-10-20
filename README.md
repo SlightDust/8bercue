@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/sidnvy/8bercue/releases">Download APK</a> ·
-  <a href="https://github.com/sidnvy/8bercue/releases/tag/v0.19.0-beta.1">Release notes</a> ·
+  <a href="https://github.com/sidnvy/8bercue/releases/tag/v0.19.1-beta.1">Release notes</a> ·
   <a href="https://github.com/sidnvy/8bercue/issues">Feedback</a>
 </p>
 
@@ -26,7 +26,10 @@ Manage profiles on compatible eUICCs, including removable cards such as 5ber, fr
 - Rename, enable, disable and delete profiles.
 - Add an eSIM by scanning a QR code, importing an image or entering an activation code.
 - Connect through a computer using ADB.
+- Use English or Simplified Chinese, following the system or an in-app language choice.
 - Confirm installation and deletion, with recovery tools for interrupted operations.
+
+Read-only recovery preserves uncertain-operation records and keeps changes paused while the current card is checked. See [recovery behavior](docs/READ_ONLY_RECOVERY.md).
 
 ## Get started
 
@@ -44,7 +47,7 @@ On the connection screen, choose **Copy ADB command** and run it while the two-m
 
 Manage the selected card from the profile list. Open a profile to turn it on/off, rename it or delete it. Switching and saving a nickname execute directly; installation and deletion require confirmation. Enabled profiles must be turned off before deletion. Connection, compatibility and recovery details are in Settings.
 
-Currently in **Beta**. See the [release notes](https://github.com/sidnvy/8bercue/releases/tag/v0.19.0-beta.1) for setup details, migration guidance and known issues.
+Currently in **Beta**. See the [release notes](https://github.com/sidnvy/8bercue/releases/tag/v0.19.1-beta.1) for setup details, migration guidance and known issues.
 
 ## Build & contribute
 

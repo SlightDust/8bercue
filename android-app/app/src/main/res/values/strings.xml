@@ -428,4 +428,10 @@
     <string name="connection_hidl_notice">"Card reads verified; management writes are not implemented for HIDL."</string>
     <string name="connection_verified_notice">"Card reads verified; changes still require confirmation."</string>
     <string name="adb_clipboard_label">"8bercue ADB connection"</string>
+    <string name="recovery_access_paused">Card access paused</string>
+    <string name="recovery_observed_unknown">Read-only access restored. The previous %1$s result is still unknown; all changes remain paused. No operation was retried.</string>
+    <string name="recovery_reconnect_for_read">A previous operation could not be confirmed. Open Connect using computer and run the displayed command to check old workers and restore read-only access. Safety records will be kept; no profile will be changed.</string>
+    <string name="recovery_card_changed">This is not the card bound to the unresolved operation. Reinsert that card and verify again. Changes remain paused.</string>
+    <string name="recovery_inventory_unstable">Two card reads returned different results. Wait and refresh to verify again. No operation was retried; changes remain paused.</string>
+    <string name="recovery_evidence_unverified">Recovery evidence or the previous backend identity could not be verified. Access remains paused. Keep app data and safety records for diagnosis.</string>
 </resources>

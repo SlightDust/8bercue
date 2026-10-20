@@ -23,3 +23,7 @@ The production-signed APK SHA-256 is `b9ab8256b744608cc970684ae85f72dcfd0bf5ef31
 Build and lint passed (0 errors / 52 warnings). 1,854 bilingual resource/format/error-coverage assertions and the existing 434 offline safety/compatibility/UI assertions passed. The installed APK was pulled and matched the delivered hash; all eight native payload/manifest entries matched the previous Beta. No card/operation authorization, journal, engine or ADB command source changed.
 
 The pre-existing quarantine marker's byte hash was preserved. Card recognition/fresh Profile read remain blocked, so Profile detail, rename/delete/install confirmations, camera UI, Android 9–12 fallback, system-Chinese default behavior and TalkBack/large-font cases are not live-qualified by these checks. No Profile write or safety-record removal was submitted. The published Beta tag and assets were not modified; this is a private candidate for review.
+
+## Version 46 publication
+
+The language work is included in 0.19.1-beta.1 (46), alongside the separate read-only recovery fix described in READ_ONLY_RECOVERY.md. Earlier private candidate-42 UI observations above are historical and do not qualify APK46. Per the owner's requested sequence, APK46 device qualification occurs after publication using the downloaded Release asset.

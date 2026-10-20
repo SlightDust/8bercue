@@ -25,6 +25,7 @@ public final class MainActivity extends Activity {
   private TextView connectionCountdown;
   private String connectionFeedback = "";
   private boolean restoreDetailAfterRead;
+  private boolean recoveryReconnectNeeded,recoveryBootstrap;
   private final java.util.ArrayList<String> recentResults = new java.util.ArrayList<>();
   private static final int QR = 40, IMAGE = 41;
   private static final ExecutorService WORK = Executors.newSingleThreadExecutor();
@@ -84,7 +85,7 @@ public final class MainActivity extends Activity {
           importImage(uri);
         }
       }
-      if(screen==6 && backend==null){
+      if(screen==6 && (backend==null||recoveryBootstrap)){
         long remaining=connectionDeadline-android.os.SystemClock.elapsedRealtime();
         if(connectionCountdown!=null)connectionCountdown.setText(countdown(remaining));
         if(!connectionExpired && remaining<=0){
@@ -153,7 +154,7 @@ public final class MainActivity extends Activity {
     return title;
   }
   private String operationLabel(String op){return switch(op){
-    case "switch" -> s(R.string.operation_switch);case "disable" -> s(R.string.operation_disable);
+    case "switch", "enable" -> s(R.string.operation_switch);case "disable" -> s(R.string.operation_disable);
     case "rename" -> s(R.string.operation_rename);case "delete" -> s(R.string.operation_delete);
     case "download" -> s(R.string.operation_download);case "cleanup" -> s(R.string.operation_cleanup);
     default -> op;
@@ -188,6 +189,7 @@ public final class MainActivity extends Activity {
         statusPreservingOutcome(s(R.string.ui_connection_lost), s(R.string.ui_start_the_computer_connection_again_pending_operations_will_not));render();
       }),0);
       backend=service;directManagement=true;companionManagement=true;fallback=false;
+      recoveryBootstrap=false;
       if(bootstrapSheet!=null){bootstrapSheet.dismiss();bootstrapSheet=null;}
       if(screen==6)screen=0;
       status(s(R.string.ui_connected), s(R.string.ui_checking_card_and_recovery_state));render();checkRecovery();
@@ -196,9 +198,12 @@ public final class MainActivity extends Activity {
   private void beginDirectBootstrap() {
     if (!managementUnavailable().isEmpty()) { status(s(R.string.ui_device_not_supported_by_this_build), managementUnavailable());return; }
     if(OPERATIONS.running()){status(s(R.string.ui_operation_in_progress), s(R.string.ui_wait_for_verification_before_changing_connection));return;}
-    try {CompanionBinderProvider.beginManagementBootstrap();}
+    boolean recovering=recoveryReconnectNeeded&&backend!=null;
+    try {if(recovering)CompanionBinderProvider.beginManagementRecoveryBootstrap();else CompanionBinderProvider.beginManagementBootstrap();}
     catch(SecurityException active){backend=null;compatibility=new JSONObject();connectDirect();return;}
-    backend=null;compatibility=new JSONObject();fallback=false;binderReadOnlyInventory=false;directManagement=true;companionManagement=true;
+    recoveryBootstrap=recovering;
+    if(!recovering)backend=null;
+    compatibility=new JSONObject();fallback=false;binderReadOnlyInventory=false;directManagement=true;companionManagement=true;
     navigationSession++;clearDetailSelection();
 
     try { connectionCommand=ConnectionCommand.forApk(getApplicationInfo().sourceDir); }
@@ -365,6 +370,11 @@ public final class MainActivity extends Activity {
           compatibility=r.optJSONObject("compatibility")==null?new JSONObject():r.optJSONObject("compatibility");
           if (!r.optBoolean("ok", true)) {
             inventory=new JSONObject();notificationCleanupAvailable=false;clearDetailSelection();
+            if(!r.optString("recoveryError").isEmpty()){
+              recoveryReconnectNeeded=true;
+              getPreferences(0).edit().putBoolean("pending",true).commit();
+              status(s(R.string.recovery_access_paused),recoveryFailure(r.optString("recoveryError")));render();return;
+            }
             String limitation=UiMessages.known(MainActivity.this,SecureElementFailure.message(r.optString("capabilityError", "")));
             status(s(R.string.ui_card_unavailable), (limitation.isEmpty()
                 ? s(R.string.ui_no_verified_inventory_was_returned_reconnect_and_refresh) : limitation)+
@@ -372,6 +382,11 @@ public final class MainActivity extends Activity {
             render();return;
           }
           inventory = r;
+          recoveryReconnectNeeded=false;
+          if("READ_ONLY_RECOVERED".equals(r.optString("recoveryState"))){
+            getPreferences(0).edit().putBoolean("pending",true).commit();
+            notice=s(R.string.recovery_observed_unknown,operationLabel(r.optString("previousOperation")));
+          }
           if (screen==3 || screen==4 || restoreDetailAfterRead) {
             JSONArray rows=inventory.optJSONArray("profiles");int found=-1;
             if(rows!=null)for(int i=0;i<rows.length();i++)if(rows.optJSONObject(i)!=null&&!selectedProfileKey.isEmpty()&&selectedProfileKey.equals(rows.optJSONObject(i).optString("selectionId"))) {if(found!=-1){found=-1;break;}found=i;}
@@ -402,6 +417,7 @@ public final class MainActivity extends Activity {
             : limitation+s(R.string.ui_changes_remain_blocked_until_card_and_recovery_verification_can));
         render();return;
       }
+      recoveryReconnectNeeded="SAFETY_PAUSED".equals(r.optString("recoveryState"));
       String priorNotificationMessage = UiMessages.known(MainActivity.this,NotificationPresentation.message(notificationStatus));
       notificationStatus = r.optString("notificationStatus", "");
       if ("none".equals(notificationStatus)) notificationStatus = "";
@@ -425,6 +441,10 @@ public final class MainActivity extends Activity {
       return;
     }
     run(s(R.string.ui_verifying_card_and_recovery), false, () -> new JSONObject(s.reconcileOperation()), r -> {
+      if(!r.optBoolean("ok",false)){
+        getPreferences(0).edit().putBoolean("pending",true).commit();
+        status(s(R.string.recovery_access_paused),recoveryFailure(r.optString("recoveryError")));render();return;
+      }
       boolean review = RecoveryUiPolicy.blocks(r.optBoolean("ok", false), r.optBoolean("requiresReconciliation", false), r.optBoolean("reviewRequired", true), r.optString("status", "unknown"));
       notice = review ? s(R.string.ui_card_read_completed_the_previous_operation_still_requires_review)
                       : "reviewed_abandoned".equals(r.optString("status"))
@@ -434,6 +454,12 @@ public final class MainActivity extends Activity {
         getPreferences(0).edit().remove("pending").commit();
       refresh();
     });
+  }
+  private String recoveryFailure(String code){
+    if("RECOVERY_CARD_CHANGED".equals(code))return s(R.string.recovery_card_changed);
+    if("RECOVERY_INVENTORY_UNSTABLE".equals(code))return s(R.string.recovery_inventory_unstable);
+    if("RECOVERY_EVIDENCE_INVALID".equals(code)||"RECOVERY_IDENTITY_UNVERIFIED".equals(code))return s(R.string.recovery_evidence_unverified);
+    return s(R.string.recovery_reconnect_for_read);
   }
   private void prepare(String op, int index, String nickname) {
     final IProfileService s = backend;

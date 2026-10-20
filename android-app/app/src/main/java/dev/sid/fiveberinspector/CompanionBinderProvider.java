@@ -31,6 +31,14 @@ public final class CompanionBinderProvider extends ContentProvider {
     private static final IBinder clientLifetime = new Binder();
     static synchronized void beginManagementBootstrap(){
         if(management!=null&&management.pingBinder())throw new SecurityException("Management session already exists");
+        beginWindow();
+    }
+    /** Explicit local UI recovery action; it does not replace or terminate the current Binder. */
+    static synchronized void beginManagementRecoveryBootstrap(){
+        if(management()==null)throw new SecurityException("No management session to recover");
+        beginWindow();
+    }
+    private static void beginWindow(){
         bootstrapFeedback="";pendingNonce=OperationTokens.create();pendingUntil=android.os.SystemClock.elapsedRealtime()+120000;
     }
     static synchronized IProfileService management(){

@@ -15,9 +15,12 @@ public final class CardTransactionLock {
  private static int depth;
  private static Path quarantineFile;
  private CardTransactionLock(){}
- public static synchronized void acquire(){acquire(new File(ROOT,"card-transaction.lock"));}
+ public static synchronized void acquire(){acquire(new File(ROOT,"card-transaction.lock"),false);}
+ /** Observation-only entry. The persistent write block is NEVER removed. */
+ static synchronized void acquireReadOnly(){acquire(new File(ROOT,"card-transaction.lock"),true);}
  // Package-private injection permits hermetic process-exclusion tests without Android paths.
- static synchronized void acquire(File file){
+ static synchronized void acquire(File file){acquire(file,false);}
+ static synchronized void acquire(File file,boolean readOnly){
   if(quarantined)throw new SecurityException("Worker termination unresolved");
   if(owner!=null){
    if(coordinated && owner==Thread.currentThread()){depth++;return;}
@@ -30,7 +33,10 @@ public final class CardTransactionLock {
    if(!parent.isDirectory()&&!parent.mkdirs())throw new IOException("Lock directory unavailable");
    Files.setPosixFilePermissions(parent.toPath(),PosixFilePermissions.fromString("rwx------"));
    Path marker=file.toPath().resolveSibling(file.getName()+".quarantine");
-   if(Files.exists(marker,LinkOption.NOFOLLOW_LINKS))throw new SecurityException("Persistent worker quarantine");
+   if(Files.exists(marker,LinkOption.NOFOLLOW_LINKS)){
+    if(!readOnly)throw new SecurityException("Persistent worker quarantine");
+    validateMarker(marker);
+   }
    opened=new RandomAccessFile(file,"rw");
    Files.setPosixFilePermissions(file.toPath(),PosixFilePermissions.fromString("rw-------"));
    FileLock acquired=opened.getChannel().tryLock();
@@ -66,5 +72,11 @@ public final class CardTransactionLock {
   release();
  }
  public static synchronized boolean isQuarantined(){return quarantined;}
+ static boolean persistentQuarantine(){return Files.exists(new File(ROOT,"card-transaction.lock.quarantine").toPath(),LinkOption.NOFOLLOW_LINKS);}
+ static void validateMarker(Path marker)throws IOException{
+  if(Files.isSymbolicLink(marker)||!Files.isRegularFile(marker,LinkOption.NOFOLLOW_LINKS)||Files.size(marker)>128
+    ||!"worker_termination_unconfirmed\n".equals(new String(Files.readAllBytes(marker),java.nio.charset.StandardCharsets.US_ASCII)))
+   throw new IOException("Invalid quarantine evidence");
+ }
  public static synchronized boolean isActive(){return owner!=null;}
 }

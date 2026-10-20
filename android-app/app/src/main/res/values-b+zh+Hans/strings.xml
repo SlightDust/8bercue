@@ -428,4 +428,10 @@
     <string name="connection_hidl_notice">"卡片读取已核验，但尚未实现 HIDL 管理写入。"</string>
     <string name="connection_verified_notice">"卡片读取已核验，任何更改仍须由你明确确认。"</string>
     <string name="adb_clipboard_label">"8bercue ADB 连接"</string>
+    <string name="recovery_access_paused">卡片访问已暂停</string>
+    <string name="recovery_observed_unknown">已恢复只读访问。上次%1$s的结果仍未确认，所有更改继续暂停，未重试任何操作。</string>
+    <string name="recovery_reconnect_for_read">上次操作结果未确认。请打开“通过电脑连接”并运行显示的命令，核验旧后台后恢复只读访问。安全记录会保留，不会更改任何 Profile。</string>
+    <string name="recovery_card_changed">当前卡片与未决操作绑定的卡片不同。请插回原卡后重新核验，更改继续暂停。</string>
+    <string name="recovery_inventory_unstable">两次读取的卡片状态不一致。请稍后刷新重新核验。未重试任何操作，更改继续暂停。</string>
+    <string name="recovery_evidence_unverified">无法核验恢复证据或旧后台身份，访问继续暂停。请保留应用数据和安全记录以便诊断。</string>
 </resources>

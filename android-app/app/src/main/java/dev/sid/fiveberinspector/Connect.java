@@ -49,6 +49,23 @@ public final class Connect {
     Looper.prepareMainLooper();
     try (SystemProviderBridge.Connection connection = SystemProviderBridge.acquire("dev.sid.fiveberinspector.companion")) {
       Object provider = connection.provider;
+      boolean alreadyConnected=connected(provider);
+      if(CardTransactionLock.persistentQuarantine()){
+        // An active app challenge is required before retiring this app's stale backends.
+        Bundle permission;
+        try{permission=call(provider,CompanionBinderProvider.CHALLENGE_METHOD,new Bundle());}
+        catch(Exception absent){
+          if(alreadyConnected){System.out.println("8bercue is already connected. Return to the app to check card access.");return 0;}
+          throw absent;
+        }
+        if(permission==null||permission.getInt("protocol")!=CompanionBinderProvider.MANAGEMENT_VERSION
+            ||permission.getInt("versionCode")!=BuildConfig.VERSION_CODE||!OperationTokens.isValid(permission.getString("nonce")))
+          throw new SecurityException("Invalid bootstrap challenge");
+        System.out.println("Checking previous 8bercue workers for read-only recovery…");System.out.flush();
+        try{ReadOnlyRecovery.beforeConnect();}
+        catch(Exception blocked){System.err.println("Read-only recovery is blocked: old workers or recovery evidence could not be verified. No safety records or profiles were changed.");return 1;}
+        System.out.println("Previous backends stopped; safety records retained. Writes remain blocked pending review.");
+      }
       if (connected(provider)) { System.out.println("8bercue is already connected. Return to the app to check card access."); return 0; }
       Bundle challenge = call(provider, CompanionBinderProvider.CHALLENGE_METHOD, new Bundle());
       if (challenge == null || challenge.getInt("protocol") != CompanionBinderProvider.MANAGEMENT_VERSION

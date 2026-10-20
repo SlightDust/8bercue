@@ -41,7 +41,7 @@ public final class ProfileUserService extends IProfileService.Stub {
     }
     @Override public synchronized String prepareCardSelection(){
         try(ServiceCaller.ShellCall caller=ServiceCaller.asShell()){
-            CardTransactionLock.acquire();try{
+            ReadOnlyRecovery.acquire();try{
                 // Read-only selection also permits observing a card with an unresolved journal.
                 // It never clears that journal or permits a mutation while recovery is required.
                 pendingCardChoice=null;invalidatePreviews();
@@ -56,7 +56,7 @@ public final class ProfileUserService extends IProfileService.Stub {
     }
     @Override public synchronized String selectCard(String opaqueChoice){
         try(ServiceCaller.ShellCall caller=ServiceCaller.asShell()){
-            CardTransactionLock.acquire();try{
+            ReadOnlyRecovery.acquire();try{
                 CardChoicePlan plan=pendingCardChoice;pendingCardChoice=null;invalidatePreviews();
                 if(plan==null)throw new SecurityException("No pending card choice");
                 FiveberReaderSelector.Target expected=plan.consume(opaqueChoice,android.os.SystemClock.elapsedRealtime());
@@ -72,16 +72,14 @@ public final class ProfileUserService extends IProfileService.Stub {
             return "{\"ok\":false,\"error\":\"WrongUid\"}";
         String step="discover";
         boolean acquired = false;
-        boolean cleanIdentity = false;
-        long originalBinderIdentity = 0L;
-        try {
+        try (ServiceCaller.ShellCall caller = ServiceCaller.asShell()) {
             step="caller"; ServiceCaller.requireApp();
             // Authenticate the real Binder caller FIRST. Only then run the
             // allowlisted read-only HAL work as our own Shell UID2000 process;
             // the app caller's Binder identity must not be inherited by HAL.
-            originalBinderIdentity = android.os.Binder.clearCallingIdentity();
-            cleanIdentity = true;
-            step="lock"; CardTransactionLock.acquire(); acquired = true;
+            // ShellCall retains the authenticated app UID for nested journal
+            // checks while HAL calls execute with the service's Shell identity.
+            step="lock"; ReadOnlyRecovery.acquire(); acquired = true;
             step="discover";FiveberReaderSelector.clearCompatibilityReport();
             // Discovery uses only standard GSMA ISD-R GetEID, and refuses any
             // malformed identity. No SIM1/SIM2 guessing or brand/version admission.
@@ -99,7 +97,14 @@ public final class ProfileUserService extends IProfileService.Stub {
             // Return the same authoritative order used by preview selection.
             java.util.List<CardProfileInventory.Entry> entries = CardProfileInventory.list();
             org.json.JSONArray profiles = new org.json.JSONArray();
-            boolean writeQualified=EnrolledWritePolicy.isAllowed(target.identityHash);
+            boolean isolated=CardTransactionLock.persistentQuarantine();
+            boolean writeQualified=EnrolledWritePolicy.isAllowed(target.identityHash)&&!isolated&&!journal().requiresReconciliation();
+            if(isolated){
+                step="recovery-readback";
+                Thread.sleep(300);
+                java.util.List<CardProfileInventory.Entry> second=CardProfileInventory.list();
+                if(!inventoryFingerprint(entries).equals(inventoryFingerprint(second)))throw new ReadOnlyRecovery.Failure("RECOVERY_INVENTORY_UNSTABLE");
+            }
             java.util.List<ProfileLifecycleGuard.Row> policyRows=PortableProfileLifecycle.rows(entries);
             for (CardProfileInventory.Entry entry : entries) {
                 String id = entry.iccid;
@@ -114,6 +119,7 @@ public final class ProfileUserService extends IProfileService.Stub {
             }
             FiveberReaderSelector.Target finalCard=FiveberReaderSelector.discover();
             if(!target.identityHash.equals(finalCard.identityHash)||!target.reader.equals(finalCard.reader))throw new SecurityException("Card changed during inventory");
+            if(isolated)ReadOnlyRecovery.observed(target.identityHash,inventoryFingerprint(entries));
             displayedFingerprint = inventoryFingerprint(entries);
             displayedCard = target.identityHash;
             displayedLifecycleFingerprint = null;
@@ -127,8 +133,10 @@ public final class ProfileUserService extends IProfileService.Stub {
             reply.put("compatibility",compatibilityJson(compatibility,true));
             reply.put("connectionNotice","Card connection: "+compatibility.route()+". "+
                 (target.reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX)?"Experimental system-policy workaround; another ROM may block it.":target.reader.startsWith(ReaderDescriptor.HIDL_PREFIX)?"Card reads verified; management writes are not implemented for HIDL.":"Card reads verified; changes still require confirmation."));
-            Log.i("EightberShell", "listProfiles success reader="+target.reader+" count="+reply.optInt("count",-1));
             reply.put("readOnly",true);
+            if(isolated)reply.put("recoveryState","READ_ONLY_RECOVERED").put("changesBlocked",true)
+                .put("previousOperation",journal().read().getProperty("operation", "")).put("previousOutcome","unknown");
+            Log.i("EightberShell", "listProfiles success reader="+target.reader+" count="+reply.optInt("count",-1));
             return reply.toString();
         } catch (Throwable ex) {
             // Avoid logging APDU payloads, ICCIDs, EIDs or server credentials.
@@ -145,6 +153,8 @@ public final class ProfileUserService extends IProfileService.Stub {
                     .put("error",cause.getClass().getSimpleName());
                 SecureElementFailure access=SecureElementFailure.find(ex);
                 if(access!=null)diagnostic.put("capabilityError",access.reason.name());
+                String recovery=ReadOnlyRecovery.code(ex);
+                if(!recovery.isEmpty())diagnostic.put("recoveryError",recovery).put("reviewRequired",true);
                 if(!step.equals("caller")&&!step.equals("lock"))diagnostic.put("compatibility",compatibilityJson(FiveberReaderSelector.compatibilityReport(),false));
                 if(cause instanceof PhoneNativeLpac.StageException)
                     diagnostic.put("phase",((PhoneNativeLpac.StageException)cause).phase);
@@ -152,12 +162,7 @@ public final class ProfileUserService extends IProfileService.Stub {
             }catch(Exception jsonError){
                 return "{\"ok\":false,\"error\":\"EncodingFailure\"}";
             }
-        } finally {
-            try { if (acquired) CardTransactionLock.release(); }
-            finally {
-                if (cleanIdentity) android.os.Binder.restoreCallingIdentity(originalBinderIdentity);
-            }
-        }
+        } finally { if (acquired) CardTransactionLock.release(); }
     }
 
     private static JSONObject compatibilityJson(CompatibilityReport report,boolean profilesVerified)throws Exception {
@@ -296,6 +301,9 @@ public final class ProfileUserService extends IProfileService.Stub {
                 .put("originalOutcome", p.getProperty("status", "unknown"))
                 .put("reviewRequired", review)
                 .put("requiresReconciliation", review);
+            if(CardTransactionLock.persistentQuarantine())return result.put("reviewRequired",true)
+                .put("requiresReconciliation",true).put("recoveryState","SAFETY_PAUSED")
+                .put("changesBlocked",true).put("notificationStatus","unavailable").toString();
             for(String key:p.stringPropertyNames())if(key.startsWith("download"))result.put(key,p.getProperty(key));
             JSONObject notification = PhoneNotificationDelivery.status();
             for (String key : new String[]{"notificationStatus", "notificationReviewRequired", "notificationWorkerStopped", "notificationCleanupAvailable", "notificationPendingCount"})
@@ -321,7 +329,7 @@ public final class ProfileUserService extends IProfileService.Stub {
         boolean acquired = false;
         try (ServiceCaller.ShellCall caller = ServiceCaller.asShell()) {
             ServiceCaller.requireApp();
-            CardTransactionLock.acquire(); acquired = true;
+            ReadOnlyRecovery.acquire(); acquired = true;
             FiveberReaderSelector.Target target = FiveberReaderSelector.discover();
             // Optional GetEuiccInfo2 remains read-only; unsupported fields are omitted.
             // EID is read and checked against the selected full identity before exporting only its mask.
@@ -350,6 +358,8 @@ public final class ProfileUserService extends IProfileService.Stub {
                 .put("error",cause.getClass().getSimpleName());
             SecureElementFailure access=SecureElementFailure.find(cause);
             if(access!=null)reply.put("capabilityError",access.reason.name());
+            String recovery=ReadOnlyRecovery.code(cause);
+            if(!recovery.isEmpty())reply.put("recoveryError",recovery).put("reviewRequired",true);
             return reply.toString();
         }catch(Exception e){return "{}";}
     }

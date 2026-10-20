@@ -47,8 +47,16 @@ public final class BootstrapProviderOfflineTest {
   check(call(CompanionBinderProvider.STATE_METHOD,new Bundle()).getBoolean("connected"),"State confirms live accepted Binder");
   rejected(CompanionBinderProvider.FEEDBACK_METHOD,next,"Consumed challenge cannot change state");
   rejected(CompanionBinderProvider.MANAGEMENT_METHOD,payload,"One-use challenge cannot replay");
+  CompanionBinderProvider.beginManagementRecoveryBootstrap();
+  Bundle recovery=call(CompanionBinderProvider.CHALLENGE_METHOD,new Bundle());
+  check(OperationTokens.isValid(recovery.getString("nonce")),"Explicit recovery creates an App-bound challenge");
+  check(call(CompanionBinderProvider.STATE_METHOD,new Bundle()).getBoolean("connected"),"Recovery window does not silently replace live backend");
+  Bundle replacement=new Bundle(recovery);replacement.putString("apkSha256","expected-apk-sha");replacement.putBinder("managementBinder",new Binder());
+  rejected(CompanionBinderProvider.MANAGEMENT_METHOD,replacement,"Cannot replace an existing live Binder even during recovery");
   service.alive=false;
   check(!call(CompanionBinderProvider.STATE_METHOD,new Bundle()).getBoolean("connected"),"Dead Binder cannot report success");
+  check(call(CompanionBinderProvider.MANAGEMENT_METHOD,replacement).getBoolean("accepted"),"Authenticated replacement only after old backend is dead");
+  rejected(CompanionBinderProvider.MANAGEMENT_METHOD,replacement,"Recovery challenge remains single-use");
   System.out.println("PASS "+checks+" bootstrap provider authentication/state assertions (actual production provider; simulated Binder)");
  }
 }

@@ -27,6 +27,9 @@ public final class FiveberReaderSelector {
         }
     }
 
+    private static final ThreadLocal<CompatibilityReport> REPORT=new ThreadLocal<>();
+    static CompatibilityReport compatibilityReport(){return REPORT.get();}
+    static void clearCompatibilityReport(){REPORT.remove();}
     private FiveberReaderSelector() {}
     private static String upperHex(byte[] data) {
         StringBuilder sb=new StringBuilder(data.length*2);
@@ -74,91 +77,89 @@ public final class FiveberReaderSelector {
         byte[] h=MessageDigest.getInstance("SHA-256").digest(eid);
         return upperHex(h);
     }
-    private static Target inspectOne(String reader) throws Exception {
-        SecureElementTransport hal=null;
-        int channel=-1;
-        String phase="service_lookup";
+    private static Target inspectOne(String reader,CompatibilityReport.Backend backend,CompatibilityReport report) throws Exception {
+        SecureElementTransport hal=null;int channel=-1;Target found=null;
+        CompatibilityReport.Stage phase=CompatibilityReport.Stage.SERVICE_LOOKUP;
+        SecureElementFailure.Reason failure=null;
         try {
             hal=SystemHalAdapter.connect(reader);
-            phase="card_presence";
-            if(!hal.isCardPresent())return null;
-            phase="open_channel";
-            channel=hal.openLogicalChannel(fromHex(ISDR_AID),(byte)0);
-            if(channel<1 || channel>3)
-                throw new SecurityException("Unexpected logical channel");
-            phase="eid_read";
-            String digest=digestPrefix(readEid(hal,channel));
-            if(ReaderAdmission.accepts(digest))
-                return new Target(reader,digest);
-            Log.w("EightberReaderPilot", "reader="+reader+" phase=invalid_eid_identity");
-            return null;
-        }catch(Throwable ignored) {
-            // Reader class / stage only: never log APDUs, full EIDs or
-            // exception messages. This distinguishes denial from slot absence.
-            Throwable cause=unwrap(ignored);
-            Log.w("EightberReaderPilot", "reader="+reader+
-                " phase="+phase+" error="+cause.getClass().getSimpleName());
-            SecureElementFailure failure=SecureElementFailure.find(ignored);
-            if(failure!=null)throw failure;
-            if(cause instanceof SecurityException && !"eid_read".equals(phase))
-                throw new SecureElementFailure(SecureElementFailure.Reason.ACCESS_DENIED);
-            if(cause instanceof ClassNotFoundException||cause instanceof NoSuchMethodException)
-                throw new SecureElementFailure(SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE);
-            return null;
+            phase=CompatibilityReport.Stage.CARD_PRESENCE;
+            if(!hal.isCardPresent())failure=SecureElementFailure.Reason.NO_CARD;
+            else {
+                phase=CompatibilityReport.Stage.MANAGEMENT_CHANNEL;
+                channel=hal.openLogicalChannel(fromHex(ISDR_AID),(byte)0);
+                if(channel<1||channel>3)throw new SecureElementFailure(SecureElementFailure.Reason.APPLET_UNAVAILABLE);
+                phase=CompatibilityReport.Stage.EID_READ;
+                String digest=digestPrefix(readEid(hal,channel));
+                if(!ReaderAdmission.accepts(digest))throw new SecureElementFailure(SecureElementFailure.Reason.INVALID_EID_RESPONSE);
+                found=new Target(reader,digest);
+            }
+        }catch(Exception error) {
+            Throwable cause=unwrap(error);SecureElementFailure typed=SecureElementFailure.find(error);
+            if(typed!=null)failure=typed.reason;
+            else if(cause instanceof ClassNotFoundException||cause instanceof NoSuchMethodException||cause instanceof NoSuchFieldException)
+                failure=SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE;
+            else if(phase==CompatibilityReport.Stage.EID_READ)failure=SecureElementFailure.Reason.INVALID_EID_RESPONSE;
+            else if(cause instanceof SecurityException)failure=SecureElementFailure.Reason.ACCESS_DENIED;
+            else if(phase==CompatibilityReport.Stage.MANAGEMENT_CHANNEL)failure=SecureElementFailure.Reason.APPLET_UNAVAILABLE;
+            else failure=SecureElementFailure.Reason.SERVICE_UNREACHABLE;
+            Log.w("EightberReaderPilot","reader="+reader+" phase="+phase+" code="+failure);
         }finally{
-            if(channel>0 && hal!=null) {
-                try {hal.closeChannel(channel);}
-                catch(Throwable ignored) {
-                    throw new SecureElementFailure(SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED);
-                }
-            }
+            if(channel>0&&hal!=null)try{hal.closeChannel(channel);}
+            catch(Exception cleanup){failure=SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED;phase=CompatibilityReport.Stage.CHANNEL_CLOSE;}
         }
+        report.record(backend,reader,phase,failure);
+        if(failure!=null)throw new SecureElementFailure(failure);
+        return found;
     }
 
-    // Discovery only. Every mutation separately verifies caller, intent and full identity.
-    public static Target discover() throws Exception { return discoverInternal(false); }
+    // The only automatic card commands are SELECT ISD-R, GetEID and bounded GET RESPONSE.
+    // Every mutation separately verifies caller, intent, current inventory and full identity.
+    public static Target discover() throws Exception {return discoverInternal();}
+    public static Target discoverKnownCardReadOnly() throws Exception {return discoverInternal();}
 
-    // Compatibility entry point for the independent read-only lab inventory.
-    // It shares generic discovery; the lab inventory may further restrict its display.
-    public static Target discoverKnownCardReadOnly() throws Exception {
-        return discoverInternal(true);
-    }
-
-    private static Target discoverInternal(boolean crossDeviceReadOnly) throws Exception {
-        if(Process.myUid()!=Process.SHELL_UID)
-            throw new SecurityException("Requires authorized ADB Shell UID2000");
-        SecureElementFailure primary;
-        try {return discoverReaders(SystemHalAdapter.readers());}
-        catch(SecureElementFailure error){
-            if(error.reason==SecureElementFailure.Reason.AMBIGUOUS_EUICC||error.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED)throw error;
-            primary=error;
-        }
-        // Never hide ambiguity or failed cleanup with an alternate backend.
-        try {
-            List<String> fallback=SystemHalAdapter.telephonyReaders();
-            if(!fallback.isEmpty())return discoverReaders(fallback);
-        } catch(ClassNotFoundException|NoSuchMethodException unavailable) { /* Unsupported system shape. */ }
-        throw primary;
-    }
-    private static Target discoverReaders(List<String> readers)throws Exception {
-        List<Target> matches=new ArrayList<>();
-        SecureElementFailure failure=null;
-        for(String reader:readers) {
+    private static Target discoverInternal() throws Exception {
+        if(Process.myUid()!=Process.SHELL_UID)throw new SecurityException("Requires authorized ADB Shell UID2000");
+        CompatibilityReport report=new CompatibilityReport();REPORT.set(report);
+        SecureElementFailure best=null;
+        for(CompatibilityReport.Backend backend:CompatibilityReport.Backend.values()){
+            List<String> readers;
             try {
-                Target found=inspectOne(reader);
-                if(found!=null)matches.add(found);
-            } catch(SecureElementFailure denied) {
-                if(denied.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED)throw denied;
-                failure=denied;
+                readers=SystemHalAdapter.readers(backend);
+                if(readers.isEmpty())throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
+            }catch(Exception error){
+                SecureElementFailure failure=typed(error);
+                report.record(backend,"",CompatibilityReport.Stage.ENUMERATION,failure.reason);
+                if(failure.reason==SecureElementFailure.Reason.INVALID_READER_INVENTORY)throw failure;
+                best=prefer(best,failure);continue;
             }
+            List<Target> matches=new ArrayList<>();
+            for(String reader:readers)try{Target found=inspectOne(reader,backend,report);if(found!=null)matches.add(found);}
+            catch(SecureElementFailure failure){
+                if(failure.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED){if(CardTransactionLock.isActive())CardTransactionLock.quarantine();throw failure;}
+                best=prefer(best,failure);
+            }
+            if(matches.size()>1){
+                report.record(backend,"",CompatibilityReport.Stage.SELECTION,SecureElementFailure.Reason.AMBIGUOUS_EUICC);
+                throw new SecureElementFailure(SecureElementFailure.Reason.AMBIGUOUS_EUICC);
+            }
+            if(matches.size()==1){Target target=matches.get(0);report.selected(backend,target.reader);return target;}
         }
-        if(matches.size()>1)
-            throw new SecureElementFailure(SecureElementFailure.Reason.AMBIGUOUS_EUICC);
-        if(matches.isEmpty()) {
-            if(failure!=null)throw failure;
-            throw new SecureElementFailure(SecureElementFailure.Reason.NO_READABLE_EUICC);
-        }
-        return matches.get(0);
+        throw best==null?new SecureElementFailure(SecureElementFailure.Reason.NO_READABLE_EUICC):best;
     }
-
+    private static SecureElementFailure typed(Exception error){
+        SecureElementFailure failure=SecureElementFailure.find(error);if(failure!=null)return failure;
+        Throwable cause=unwrap(error);
+        if(cause instanceof ClassNotFoundException||cause instanceof NoSuchMethodException||cause instanceof NoSuchFieldException)
+            return new SecureElementFailure(SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE);
+        if(cause instanceof SecurityException)return new SecureElementFailure(SecureElementFailure.Reason.ACCESS_DENIED);
+        return new SecureElementFailure(SecureElementFailure.Reason.SERVICE_UNREACHABLE);
+    }
+    private static SecureElementFailure prefer(SecureElementFailure before,SecureElementFailure now){
+        if(before==null||priority(now.reason)>priority(before.reason))return now;return before;
+    }
+    private static int priority(SecureElementFailure.Reason reason){return switch(reason){
+        case ACCESS_DENIED -> 5;case INVALID_EID_RESPONSE -> 4;case APPLET_UNAVAILABLE -> 3;
+        case SYSTEM_INTERFACE_UNAVAILABLE,SERVICE_UNREACHABLE -> 2;case NO_CARD -> 1;default -> 0;
+    };}
 }

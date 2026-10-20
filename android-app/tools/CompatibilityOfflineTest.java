@@ -42,9 +42,9 @@ public final class CompatibilityOfflineTest {
   return new OmapiSecureElementTransport(reader,new Listener(){},FakeReader.class,FakeSession.class,FakeChannel.class,Listener.class);
  }
  static final class Card implements SecureElementTransport {
-  int closed;byte[] eid=new byte[16];boolean denied,bad,fragmented,endless;int frames;
+  int closed;byte[] eid=new byte[16];boolean denied,bad,fragmented,endless,absent,failClose;int frames;
   Card(int identity){eid[0]=(byte)identity;}
-  public boolean isCardPresent(){return true;}
+  public boolean isCardPresent(){return !absent;}
   public int openLogicalChannel(byte[] aid,byte p2){if(denied)throw new SecureElementFailure(SecureElementFailure.Reason.ACCESS_DENIED);return 1;}
   public byte[] transmit(byte[] cmd){
    frames++;
@@ -55,7 +55,7 @@ public final class CompatibilityOfflineTest {
    if(fragmented)check(Arrays.equals(cmd,new byte[]{(byte)0x81,(byte)0xC0,0,0,0x15}));
    return java.nio.ByteBuffer.allocate(23).put(body).put((byte)0x90).put((byte)0).array();
   }
-  public void closeChannel(int channel){closed++;}
+  public void closeChannel(int channel){closed++;if(failClose)throw new SecurityException("Never expose private close message");}
  }
 
  public static final class Request {
@@ -271,7 +271,72 @@ public final class CompatibilityOfflineTest {
   check(SystemHalAdapter.fallbackCalls==calls);SystemHalAdapter.fallback.clear();SystemHalAdapter.transports.clear();
  }
 
+ public static final class HidlResponse {public byte channelNumber=2;}
+ public interface HidlCallback {void onValues(HidlResponse response,byte status);}
+ public static final class FakeHidl {
+  int closeCount;byte status,closeStatus;boolean lost,duplicate;
+  public boolean isCardPresent(){return true;}
+  public void openLogicalChannel(ArrayList<Byte> aid,byte p2,HidlCallback callback){
+   if(lost)throw new IllegalStateException("Lost reply");HidlResponse response=new HidlResponse();
+   if(status!=0)response.channelNumber=0;callback.onValues(response,status);if(duplicate)callback.onValues(response,status);
+  }
+  public ArrayList<Byte> transmit(ArrayList<Byte> command){return new ArrayList<>(List.of((byte)0x90,(byte)0));}
+  public byte closeChannel(byte channel){closeCount++;check(channel==2);return closeStatus;}
+ }
+ static HidlSecureElementTransport hidl(FakeHidl fake){return new HidlSecureElementTransport(fake,FakeHidl.class,HidlCallback.class);}
+ static void compatibilityDetectionTests()throws Exception{
+  String manifest="<manifest><hal format='hidl'><name>android.hardware.secure_element</name><fqname>@1.2::ISecureElement/SIM2</fqname></hal></manifest>";
+  check(HidlManifestReaders.parse(new String[]{manifest}).equals(List.of("hidl.SIM2")));
+  check(HidlManifestReaders.parse(new String[]{manifest,manifest}).equals(List.of("hidl.SIM2")));
+  check(HidlManifestReaders.parse(new String[]{manifest.replace("manifest","compatibility-matrix")}).isEmpty());
+  check(HidlManifestReaders.parse(new String[]{manifest.replace("format='hidl'","format='aidl'")}).isEmpty());
+  check(HidlManifestReaders.parse(new String[]{"<manifest><hal><name>android.hardware.secure_element</name><version>1.0-2</version><interface><name>ISecureElement</name><instance>SIM9</instance></interface></hal></manifest>"}).equals(List.of("hidl.SIM9")));
+  rejects(()->HidlManifestReaders.parse(new String[]{manifest.replace("@1.2","@2.0")}));
+  rejects(()->HidlManifestReaders.parse(new String[]{"<!DOCTYPE x [<!ENTITY bad SYSTEM 'file:///not-readable'>]>"+manifest}));
+  rejects(()->HidlManifestReaders.parse(new String[]{manifest.replace("SIM2","../SIM2")}));
+  SystemHalAdapter.transports.clear();SystemHalAdapter.fallback.clear();SystemHalAdapter.failures.clear();SystemHalAdapter.order.clear();
+  SystemHalAdapter.transports.put("SIM1",new Card(9));SystemHalAdapter.fallback.put("telephony.1.0",new Card(2));
+  check(FiveberReaderSelector.discover().reader.equals("SIM1"));check(SystemHalAdapter.order.equals(List.of(CompatibilityReport.Backend.HAL_AIDL)));
+  CompatibilityReport report=FiveberReaderSelector.compatibilityReport();check(report.selectedBackend().equals("HAL_AIDL")&&report.summary().contains("owned channel closed"));
+  SystemHalAdapter.transports.clear();SystemHalAdapter.failures.put(CompatibilityReport.Backend.HAL_HIDL,SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE);SystemHalAdapter.order.clear();
+  Card denied=new Card(9);denied.denied=true;SystemHalAdapter.transports.put("SIM1",denied);
+  check(FiveberReaderSelector.discover().reader.equals("telephony.1.0"));report=FiveberReaderSelector.compatibilityReport();
+  check(SystemHalAdapter.order.equals(List.of(CompatibilityReport.Backend.HAL_AIDL,CompatibilityReport.Backend.HAL_HIDL,CompatibilityReport.Backend.TELEPHONY)));
+  check(report.attempts().size()==3&&report.attempts().get(0).reason==SecureElementFailure.Reason.ACCESS_DENIED&&report.attempts().get(1).reason==SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE);
+  check(report.route().equals("Telephony / telephony.1.0")&&!report.summary().contains("vendor"));
+  SystemHalAdapter.failures.clear();SystemHalAdapter.transports.clear();SystemHalAdapter.fallback.clear();SystemHalAdapter.order.clear();
+  SystemHalAdapter.transports.put("hidl.SIM1",new Card(9));check(FiveberReaderSelector.discover().reader.equals("hidl.SIM1"));
+  check(SystemHalAdapter.order.equals(List.of(CompatibilityReport.Backend.HAL_AIDL,CompatibilityReport.Backend.HAL_HIDL)));
+  check(!ReaderDescriptor.writable("hidl.SIM1"));
+  SystemHalAdapter.transports.clear();Card absent=new Card(8);absent.absent=true;SystemHalAdapter.transports.put("SIM1",absent);
+  SystemHalAdapter.failures.put(CompatibilityReport.Backend.TELEPHONY,SecureElementFailure.Reason.ACCESS_DENIED);
+  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure expected){check(expected.reason==SecureElementFailure.Reason.ACCESS_DENIED);}
+  report=FiveberReaderSelector.compatibilityReport();check(report.selectedBackend().isEmpty()&&report.attempts().size()==4&&report.attempts().get(0).reason==SecureElementFailure.Reason.NO_CARD);
+  check(report.summary().contains("no card reported")&&report.summary().contains("Shell access denied"));
+  SystemHalAdapter.failures.clear();SystemHalAdapter.transports.clear();SystemHalAdapter.order.clear();Card unsafe=new Card(6);unsafe.failClose=true;SystemHalAdapter.transports.put("SIM1",unsafe);SystemHalAdapter.fallback.put("telephony.1.0",new Card(2));CardTransactionLock.active=true;
+  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure expected){check(expected.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED);}
+  check(SystemHalAdapter.order.equals(List.of(CompatibilityReport.Backend.HAL_AIDL)));check(FiveberReaderSelector.compatibilityReport().selectedBackend().isEmpty());check(CardTransactionLock.quarantined);CardTransactionLock.active=false;CardTransactionLock.quarantined=false;
+  check(FiveberReaderSelector.compatibilityReport().attempts().get(0).stage==CompatibilityReport.Stage.CHANNEL_CLOSE);
+  check(ReaderDescriptor.hidlInstances(List.of("SIM2")).equals(List.of("hidl.SIM2")));rejects(()->ReaderDescriptor.hidlInstances(List.of("SIM1","SIM1")));rejects(()->ReaderDescriptor.hidlInstances(List.of("../SIM1")));
+  for(int api:new int[]{28,29,30,31,32,33,34,35,36,37})check(ManagementAvailability.reason(api,new String[]{"arm64-v8a"}).isEmpty());
+  FakeHidl fake=new FakeHidl();HidlSecureElementTransport transport=hidl(fake);check(transport.isCardPresent());check(transport.openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0)==2);
+  check(Arrays.equals(transport.transmit(command(new byte[]{(byte)0xbf,0x3e,3,0x5c,1,0x5a},2)),new byte[]{(byte)0x90,0}));
+  HidlSecureElementTransport owned=transport;rejects(()->owned.transmit(command(new byte[]{(byte)0xbf,0x31,0},2)));rejects(()->owned.closeChannel(1));owned.closeChannel(2);check(fake.closeCount==1);
+  FakeHidl rejected=new FakeHidl();rejected.status=2;rejects(()->hidl(rejected).openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0));check(rejected.closeCount==0);
+  FakeHidl lost=new FakeHidl();lost.lost=true;try{hidl(lost).openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0);throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED);}
+  FakeHidl duplicate=new FakeHidl();duplicate.duplicate=true;rejects(()->hidl(duplicate).openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0));
+  FakeHidl badClose=new FakeHidl();badClose.closeStatus=1;HidlSecureElementTransport unclosed=hidl(badClose);unclosed.openLogicalChannel(TelephonyChannelCodec.unhex(TelephonyChannelCodec.ISDR),(byte)0);rejects(()->unclosed.closeChannel(2));
+  SystemHalAdapter.transports.clear();SystemHalAdapter.fallback.clear();SystemHalAdapter.failures.clear();SystemHalAdapter.order.clear();
+  SystemHalAdapter.failures.put(CompatibilityReport.Backend.HAL_AIDL,SecureElementFailure.Reason.INVALID_READER_INVENTORY);
+  SystemHalAdapter.fallback.put("telephony.1.0",new Card(1));
+  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.INVALID_READER_INVENTORY);}
+  check(SystemHalAdapter.order.equals(List.of(CompatibilityReport.Backend.HAL_AIDL)));
+  check(FiveberReaderSelector.compatibilityReport().summary().contains("automatic selection stopped"));
+  SystemHalAdapter.transports.clear();SystemHalAdapter.fallback.clear();SystemHalAdapter.failures.clear();SystemHalAdapter.order.clear();
+ }
+
  public static void main(String[] args)throws Exception {
+  compatibilityDetectionTests();
   telephonyTests();renameTests();protocolTests();scopeTests();singleChannelNotificationTests();deletionNotificationTests();
   check(ManagementAvailability.reason(33,new String[]{"arm64-v8a"}).isEmpty());
   check(ManagementAvailability.reason(36,new String[]{"arm64-v8a"}).isEmpty());
@@ -302,7 +367,7 @@ public final class CompatibilityOfflineTest {
   FakeReader cleanup=new FakeReader();OmapiSecureElementTransport cleanupSe=omapi(cleanup);cleanupSe.openLogicalChannel(new byte[]{1},(byte)0);cleanup.session.channel.failClose=true;
   try{cleanupSe.closeChannel(1);throw new AssertionError();}catch(InvocationTargetException expected){check(cleanup.session.closed);}
   SystemHalAdapter.transports.clear();
-  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.NO_READABLE_EUICC);}
+  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.NO_SERVICE);}
   Card one=new Card(1);one.fragmented=true;SystemHalAdapter.transports.put("omapi.SIM1",one);
   FiveberReaderSelector.Target target=FiveberReaderSelector.discover();check(target.reader.equals("omapi.SIM1"));check(target.identityHash.length()==64&&one.closed==1);
   one.fragmented=false;Card two=new Card(2);SystemHalAdapter.transports.put("omapi.SIM2",two);
@@ -311,10 +376,10 @@ public final class CompatibilityOfflineTest {
   Card blocked=new Card(1);blocked.denied=true;SystemHalAdapter.transports.put("omapi.SIM1",blocked);
   try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.ACCESS_DENIED);}
   SystemHalAdapter.transports.clear();Card malformed=new Card(1);malformed.bad=true;SystemHalAdapter.transports.put("SIM1",malformed);
-  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.NO_READABLE_EUICC);}
+  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.INVALID_EID_RESPONSE);}
   check(malformed.closed==1);
   SystemHalAdapter.transports.clear();Card endless=new Card(1);endless.endless=true;SystemHalAdapter.transports.put("SIM1",endless);
-  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.NO_READABLE_EUICC);}
+  try{FiveberReaderSelector.discover();throw new AssertionError();}catch(SecureElementFailure failure){check(failure.reason==SecureElementFailure.Reason.INVALID_EID_RESPONSE);}
   check(endless.frames==6&&endless.closed==1);android.os.Process.uid=10001;rejects(()->FiveberReaderSelector.discover());android.os.Process.uid=2000;
   CardReadApduPolicy policy=new CardReadApduPolicy(1,false);
   rejects(()->policy.authorize(new byte[]{(byte)0x81,(byte)0xE2,(byte)0x91,0,3,(byte)0xBF,0x31,0}));

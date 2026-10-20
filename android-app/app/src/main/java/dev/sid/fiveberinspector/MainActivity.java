@@ -27,7 +27,7 @@ public final class MainActivity extends Activity {
   private boolean binding, bound, fallback, companionManagement, destroyed, resumed, needsConnectionRead;
   private android.net.Uri pendingImport;
   private int screen;
-  private JSONObject inventory = new JSONObject(), cardInfo = new JSONObject();
+  private JSONObject inventory = new JSONObject(), cardInfo = new JSONObject(), compatibility = new JSONObject();
   private LinearLayout content, statusBox;
   private TextView statusTitle, statusDetail;
   private EditText activation, confirmation;
@@ -88,7 +88,7 @@ public final class MainActivity extends Activity {
       () -> runOnUiThread(this::connectIfGranted);
   private final Shizuku.OnBinderDeadListener dead = () -> runOnUiThread(() -> {
     if (companionManagement || directManagement) return; // Shizuku Binder death does not kill local Shell IPC.
-    backend = null;
+    backend = null;compatibility=new JSONObject();
     bound = false;
     binding = false;
     status("Connection lost",
@@ -196,20 +196,20 @@ public final class MainActivity extends Activity {
     try {
       service.asBinder().linkToDeath(()->runOnUiThread(()->{
         if(backend!=service)return;
-        backend=null;bound=false;navigationSession++;dismissProfilePanel();
+        backend=null;compatibility=new JSONObject();bound=false;navigationSession++;dismissProfilePanel();
         statusPreservingOutcome("Connection lost", "Start the computer connection again. Pending operations will not be repeated.");render();
       }),0);
       backend=service;directManagement=true;companionManagement=true;fallback=false;bound=true;binding=false;
       if(bootstrapSheet!=null){bootstrapSheet.dismiss();bootstrapSheet=null;}
       status("Connected", "Checking card and recovery state…");render();checkRecovery();
-    }catch(Exception unavailable){backend=null;bound=false;}
+    }catch(Exception unavailable){backend=null;compatibility=new JSONObject();bound=false;}
   }
   private void beginDirectBootstrap() {
     if (!managementUnavailable().isEmpty()) { status("Device not supported by this build", managementUnavailable());return; }
     if(OPERATIONS.running()){status("Operation in progress", "Wait for verification before changing connection.");return;}
     try {CompanionBinderProvider.beginManagementBootstrap();}
-    catch(SecurityException active){getPreferences(0).edit().putBoolean("preferDirectBinder",true).apply();backend=null;connectDirect();return;}
-    backend=null;bound=false;binding=false;fallback=false;binderReadOnlyInventory=false;directManagement=true;companionManagement=true;
+    catch(SecurityException active){getPreferences(0).edit().putBoolean("preferDirectBinder",true).apply();backend=null;compatibility=new JSONObject();connectDirect();return;}
+    backend=null;compatibility=new JSONObject();bound=false;binding=false;fallback=false;binderReadOnlyInventory=false;directManagement=true;companionManagement=true;
     navigationSession++;dismissProfilePanel();
     getPreferences(0).edit().putBoolean("preferDirectBinder",true).apply();
     Sheet help=new Sheet("Connect using your computer");
@@ -417,7 +417,7 @@ public final class MainActivity extends Activity {
       catch (Throwable ignored) {}
       bound = false; binding = false;
     }
-    backend = null; fallback = false; companionManagement = false;
+    backend = null;compatibility=new JSONObject(); fallback = false; companionManagement = false;
     if (binderReadOnlyInventory) {
       binderReadOnlyInventory = false;
       inventory = new JSONObject(); // Never treat a prior read-only card view as a write preview.
@@ -437,11 +437,13 @@ public final class MainActivity extends Activity {
     }
     run("Reading your eSIMs", false,
         () -> s != null ? new JSONObject(s.listProfiles()) : ShellCompanionClient.list(), r -> {
+          compatibility=r.optJSONObject("compatibility")==null?new JSONObject():r.optJSONObject("compatibility");
           if (!r.optBoolean("ok", true)) {
             inventory=new JSONObject();notificationCleanupAvailable=false;dismissProfilePanel();
             String limitation=SecureElementFailure.message(r.optString("capabilityError", ""));
-            status("Card unavailable", limitation.isEmpty()
-                ? "No verified inventory was returned. Reconnect and refresh." : limitation);
+            status("Card unavailable", (limitation.isEmpty()
+                ? "No verified inventory was returned. Reconnect and refresh." : limitation)+
+                  (compatibility.length()>0?" Open Compatibility check for the result of each channel.":""));
             render();return;
           }
           inventory = r;
@@ -766,6 +768,7 @@ public final class MainActivity extends Activity {
       add(text(managementUnavailable(), 15, MUTED, false), 10);
       add(text("You can still read setup, privacy and licensing information in Settings.", 14, MUTED, false), 16);return;
     }
+    if(compatibility.length()>0)add(action("Card connection: "+compatibility.optString("route","Not verified")+"  ›",false,this::showCompatibility),12);
     if (binderReadOnlyInventory)
       add(text("Read-only Binder inventory · profile editing requires a separately authorized management connection.", 13, MUTED, false), 18);
     else add(action("+  Add eSIM", true, () -> navigate(1)), 18);
@@ -1090,8 +1093,24 @@ public final class MainActivity extends Activity {
       public void afterTextChanged(android.text.Editable value) {}
     });
   }
+  private void showCompatibility() {
+    Sheet check=new Sheet("Compatibility check");
+    if(compatibility.length()==0)check.copy("Connect the Shell service, then refresh to check this card. No card has been verified in this connection.");
+    else {
+      check.fact("Selected card channel",compatibility.optString("route","No verified card connection"));
+      check.copy(compatibility.optString("details","No channel observations returned."));
+      check.copy(compatibility.optBoolean("profileReadVerified",false)
+          ? "Profile reading verified. This read-only check does not test downloads, switching or deletion."
+          : "Profile reading has not been verified. No compatibility check changes a profile.");
+    }
+    check.copy("Order: Secure Element HAL (AIDL, then HIDL), Telephony, then OMAPI. Multiple readable cards or unconfirmed channel cleanup stop selection. No brand or Android-version list selects a card.");
+    check.button("Run read-only check",false,()->{check.dialog.dismiss();if(backend!=null||fallback)refresh();else status("Connect first","Use Connect using computer, then run the compatibility check.");});
+    check.button("Done",false,check.dialog::dismiss);check.show();
+  }
   private void settings() {
     add(text("Connection", 19, TEXT, true), 24);
+    add(text("Card connection: "+compatibility.optString("route","Not checked in this connection"),14,MUTED,false),8);
+    add(action("Compatibility check",false,this::showCompatibility),12);
     add(text(directManagement && backend != null ? "Independent Binder connected — no Shizuku"
           : companionManagement ? "Shell Companion connected — no Shizuku"
           : binderReadOnlyInventory ? "Standalone Binder read-only inventory — no Shizuku"
@@ -1150,7 +1169,7 @@ public final class MainActivity extends Activity {
         return reply;
       }, reply -> {
         if (reply.optBoolean("ok",false) && reply.optJSONArray("profiles") != null) {
-          backend = null;
+          backend = null;compatibility=new JSONObject();
           fallback = false;
           companionManagement = false;
           binderReadOnlyInventory = true;
@@ -1292,6 +1311,8 @@ public final class MainActivity extends Activity {
         + (inventory.optJSONArray("profiles") == null ? "unknown"
                                                       : inventory.optJSONArray("profiles").length())
         + "\nOperation pending verification: " + getPreferences(0).getBoolean("pending", false)
+        + "\nCard channel: " + compatibility.optString("route","not checked")
+        + "\nRead-only compatibility observations:\n" + compatibility.optString("details","none")
         + "\nEngine: lpac/libeuicc 2.3.0\n";
     Intent send = new Intent(Intent.ACTION_SEND);
     send.setType("text/plain");

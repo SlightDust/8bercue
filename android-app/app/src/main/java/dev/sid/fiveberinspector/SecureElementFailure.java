@@ -4,7 +4,8 @@ package dev.sid.fiveberinspector;
 final class SecureElementFailure extends SecurityException {
     enum Reason {
         NO_SERVICE, SYSTEM_INTERFACE_UNAVAILABLE, ACCESS_DENIED, NO_READABLE_EUICC,
-        AMBIGUOUS_EUICC, CHANNEL_CLEANUP_FAILED, READ_ONLY_TRANSPORT
+        AMBIGUOUS_EUICC, CHANNEL_CLEANUP_FAILED, READ_ONLY_TRANSPORT,
+        NO_CARD, APPLET_UNAVAILABLE, INVALID_EID_RESPONSE, SERVICE_UNREACHABLE, INVALID_READER_INVENTORY
     }
     final Reason reason;
     SecureElementFailure(Reason reason) { super(reason.name()); this.reason = reason; }
@@ -17,15 +18,25 @@ final class SecureElementFailure extends SecurityException {
         if (Reason.ACCESS_DENIED.name().equals(code))
             return "The system denies access to the eUICC applet. ADB or Shizuku alone cannot grant card access on this ROM.";
         if (Reason.NO_SERVICE.name().equals(code))
-            return "No supported Secure Element service is available on this device.";
+            return "No accessible card service was found. Check the compatibility results for HAL, Telephony and OMAPI.";
         if (Reason.SYSTEM_INTERFACE_UNAVAILABLE.name().equals(code))
-            return "This ROM does not expose the system Secure Element interfaces required by this build.";
+            return "Required system interface classes or methods are unavailable. Check the result for each card channel.";
         if (Reason.NO_READABLE_EUICC.name().equals(code))
             return "No readable eUICC was found. Check the card and this ROM's Secure Element access policy.";
         if (Reason.AMBIGUOUS_EUICC.name().equals(code))
             return "More than one readable eUICC was found. Automatic card selection is blocked.";
         if (Reason.CHANNEL_CLEANUP_FAILED.name().equals(code))
             return "A card channel could not be closed. Stop and verify the card connection before continuing.";
+        if (Reason.INVALID_READER_INVENTORY.name().equals(code))
+            return "The system reader inventory is invalid or exceeds this build's bounds. Automatic selection stopped.";
+        if (Reason.NO_CARD.name().equals(code))
+            return "The checked readers reported no card. Check the inserted card and the reader routing.";
+        if (Reason.APPLET_UNAVAILABLE.name().equals(code))
+            return "The ISD-R management applet could not be opened on the checked readers.";
+        if (Reason.INVALID_EID_RESPONSE.name().equals(code))
+            return "The card did not return a verifiable complete eUICC identity.";
+        if (Reason.SERVICE_UNREACHABLE.name().equals(code))
+            return "A card service could not be reached; it may be absent or blocked by system policy.";
         if (Reason.READ_ONLY_TRANSPORT.name().equals(code))
             return "This operation is unavailable on the selected card connection.";
         return "";

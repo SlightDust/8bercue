@@ -60,9 +60,9 @@ public final class ProfileUserService extends IProfileService.Stub {
             originalBinderIdentity = android.os.Binder.clearCallingIdentity();
             cleanIdentity = true;
             step="lock"; CardTransactionLock.acquire(); acquired = true;
-            step="discover";
+            step="discover";FiveberReaderSelector.clearCompatibilityReport();
             // Discovery uses only standard GSMA ISD-R GetEID, and refuses any
-            // un-enrolled card. No SIM1/SIM2 guessing or isRemovable logic.
+            // malformed identity. No SIM1/SIM2 guessing or brand/version admission.
             FiveberReaderSelector.Target target = FiveberReaderSelector.discover();
             step="bundle";
 
@@ -100,7 +100,10 @@ public final class ProfileUserService extends IProfileService.Stub {
             reply.put("profiles", profiles).put("count", profiles.length()).put("writeQualified",writeQualified);
             reply.put("shizuku","Shizuku".equals(transport));
             reply.put("transport",transport+" UID2000 / "+target.reader);
-            if(target.reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX))reply.put("connectionNotice","Experimental Telephony connection. Each change requires confirmation and a fresh card check.");
+            CompatibilityReport compatibility=FiveberReaderSelector.compatibilityReport();
+            reply.put("compatibility",compatibilityJson(compatibility,true));
+            reply.put("connectionNotice","Card connection: "+compatibility.route()+". "+
+                (target.reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX)?"Experimental system-policy workaround; another ROM may block it.":target.reader.startsWith(ReaderDescriptor.HIDL_PREFIX)?"Card reads verified; management writes are not implemented for HIDL.":"Card reads verified; changes still require confirmation."));
             Log.i("FiveberShizuku", "listProfiles success reader="+target.reader+" count="+reply.optInt("count",-1));
             reply.put("readOnly",true);
             return reply.toString();
@@ -121,6 +124,7 @@ public final class ProfileUserService extends IProfileService.Stub {
                     .put("error",cause.getClass().getSimpleName());
                 SecureElementFailure access=SecureElementFailure.find(ex);
                 if(access!=null)diagnostic.put("capabilityError",access.reason.name());
+                if(!step.equals("caller")&&!step.equals("lock"))diagnostic.put("compatibility",compatibilityJson(FiveberReaderSelector.compatibilityReport(),false));
                 if(cause instanceof PhoneNativeLpac.StageException)
                     diagnostic.put("phase",((PhoneNativeLpac.StageException)cause).phase);
                 return diagnostic.toString();
@@ -133,6 +137,17 @@ public final class ProfileUserService extends IProfileService.Stub {
                 if (cleanIdentity) android.os.Binder.restoreCallingIdentity(originalBinderIdentity);
             }
         }
+    }
+
+    private static JSONObject compatibilityJson(CompatibilityReport report,boolean profilesVerified)throws Exception {
+        if(report==null)return new JSONObject();
+        org.json.JSONArray attempts=new org.json.JSONArray();
+        for(CompatibilityReport.Attempt attempt:report.attempts())attempts.put(new JSONObject()
+            .put("backend",attempt.backend.name()).put("reader",attempt.reader).put("stage",attempt.stage.name())
+            .put("condition",attempt.reason==null?"VERIFIED":attempt.reason.name()));
+        return new JSONObject().put("schema",1).put("readOnlyProbe",true).put("selectedBackend",report.selectedBackend())
+            .put("selectedReader",report.selectedReader()).put("route",report.route()).put("details",report.summary())
+            .put("profileReadVerified",profilesVerified).put("writesTested",false).put("attempts",attempts);
     }
 
     @Override

@@ -1,6 +1,6 @@
 # Build the corresponding release source
 
-This branch builds the unpublished 8bercue 0.18.1-rc7 compatibility candidate, versionCode 29. Debug-only laboratory tools, private device records, activation credentials and signing keys are excluded; none are compiled into the release APK. The public compatibility regressions run with `bash android-app/tools/run_compatibility_tests.sh`. The private laboratory suite is not included.
+This branch builds the unpublished 8bercue 0.18.1-rc9 compatibility candidate, versionCode 31. Debug-only laboratory tools, private device records, activation credentials and signing keys are excluded; none are compiled into the release APK. The public compatibility regressions run with `bash android-app/tools/run_compatibility_tests.sh`. The private laboratory suite is not included.
 
 Use the versions in release/toolchain.json. Set JAVA_HOME to JDK 17+, ANDROID_HOME to the SDK with platform 36 and NDK 27.3.13750724. The Gradle wrapper downloads its pinned distribution; Maven dependencies are resolved from the repositories in settings.gradle with dependency locks and verification metadata. An existing populated Gradle cache supports --offline.
 

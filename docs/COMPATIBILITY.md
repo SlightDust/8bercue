@@ -2,13 +2,16 @@
 
 Installing the APK and accessing an eUICC are separate requirements. Minimum SDK is 28 (Android 9), with ARM64 native components built for API 28. Compile/target SDK remains 36.
 
-The published v0.18.0-beta.1 APK (0.18.0-rc1 / 22) rejects management below API 36. The unpublished 0.18.1-rc7 / 29 candidate checks actual capabilities instead and includes an **experimental Shell Telephony fallback with scoped management protocols**. This is not general Android 13 qualification.
+The published v0.18.0-beta.1 APK (0.18.0-rc1 / 22) rejects management below API 36. The unpublished 0.18.1-rc9 / 31 candidate checks actual capabilities instead and includes an **experimental Shell Telephony fallback with scoped management protocols**. This is not general Android 13 qualification.
 
 ## Transports
 
 1. Prefer registered hardware AIDL instances using interface classes from the trusted system SecureElement APK.
-2. Otherwise try framework OMAPI, retaining its applet access rules.
-3. If no card was verified through that preferred backend, try the experimental Shell Telephony backend. Never hide an ambiguous selection or failed channel cleanup by falling back.
+2. Otherwise check declared HIDL HAL readers with real service/channel/GetEID observations. HIDL is read-only in this build; no HAL init/reset is called.
+3. If no card was verified through HAL, try the experimental Shell Telephony backend.
+4. Otherwise try framework OMAPI, retaining its applet access rules. Never hide ambiguity or failed channel cleanup by falling back.
+
+[Automatic compatibility checks](AUTOMATIC_COMPATIBILITY.md) describe the per-channel report, explicit missing conditions and read-only rerun in Home/Settings. No brand/model or Android 16 list is consulted.
 
 Every backend retains caller authentication, complete EID identity binding and bounded APDU policies. Reader names include the transport namespace. A backend change invalidates an existing management selection. No path initializes/resets the HAL or closes another client's channels.
 
@@ -34,6 +37,10 @@ Device: Xiaomi 2109119BC / mona, ROM V816.0.2.0.TKVCNXM, Android 13 / API 33, AR
 | 0.18.1-rc7 / 29 | Completed a fresh public BetterRoaming install, temporary activation, povo restoration and disposable deletion through normal UI. Both installation and deletion notifications were acknowledged and removed locally. Full original inventory was restored and Android reported povo active. Also repaired the exact inherited deletion notification. See the [profile-cycle record](ANDROID13_PROFILE_CYCLE.md). |
 
 Network registration, mobile-data traffic, enable/disable notification delivery, standalone disable, reboot persistence and other ROMs remain unqualified. The successful public BetterRoaming entry is not evidence that arbitrary operator activation codes work.
+
+Version 31 completed same-signer upgrade, launch, normal computer connection, Home/Settings compatibility details, explicit read-only recheck and independent native/Java three-profile read on the same Xiaomi. AIDL returned no accessible instances; declared HIDL services could not be reached; Telephony slot 0 could not open ISD-R and slot 1 / port 0 verified the card. Full original inventory, operation/notification journals, UID and default-data setting were preserved. No version-31 write or network-service acceptance is claimed. HIDL successful card reads remain synthetic-only here because this ROM denies service lookup.
+
+Version 31 signed APK SHA-256: e07490486bb24a7cf298ecb3941f843e67535b00438b604f1d3cb11b44ef5abc. See [automatic compatibility checks](AUTOMATIC_COMPATIBILITY.md).
 
 Version 29 signed APK SHA-256: e83838ffc26ac1de0ea3ed7dd37f4a23590a0b17161a1681b37130e6e7d3e3b3. Same-signer upgrades preserve application data, UID and safety history. Earlier Moto/Beta results do not qualify this candidate.
 

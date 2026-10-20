@@ -6,11 +6,11 @@ final class SystemHalAdapter {
  static String dexPath()throws Exception {
   java.lang.Process process=new ProcessBuilder("/system/bin/pm","path","com.android.se").redirectError(ProcessBuilder.Redirect.to(new File("/dev/null"))).start();
   try {
-   if(!process.waitFor(5,TimeUnit.SECONDS)||process.exitValue()!=0)throw new SecurityException("System HAL package unavailable");
+   if(!process.waitFor(5,TimeUnit.SECONDS)||process.exitValue()!=0)throw new SecureElementFailure(SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE);
    try(Reader in=new InputStreamReader(process.getInputStream(),java.nio.charset.StandardCharsets.UTF_8)){
-    String line=BoundedLines.read(in,2048);if(line==null||!line.startsWith("package:")||BoundedLines.read(in,2048)!=null)throw new SecurityException("Ambiguous HAL package");
+    String line=BoundedLines.read(in,2048);if(line==null||!line.startsWith("package:")||BoundedLines.read(in,2048)!=null)throw new SecureElementFailure(SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE);
     String path=line.substring(8);File file=new File(path);
-    if(!path.matches("/(system|system_ext|product|vendor|apex)/[A-Za-z0-9_./@+-]+\\.apk")||!file.isFile()||!file.getCanonicalPath().equals(path))throw new SecurityException("Untrusted HAL class source");
+    if(!path.matches("/(system|system_ext|product|vendor|apex)/[A-Za-z0-9_./@+-]+\\.apk")||!file.isFile()||!file.getCanonicalPath().equals(path))throw new SecureElementFailure(SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE);
     return path;
    }
   }finally{if(process.isAlive())process.destroyForcibly();}
@@ -25,12 +25,23 @@ final class SystemHalAdapter {
  private static Object asInterface(String name,Object binder)throws Exception {
   return Class.forName(name+"$Stub").getMethod("asInterface",android.os.IBinder.class).invoke(null,binder);
  }
- static java.util.List<String> readers()throws Exception {
+ static java.util.List<String> readers()throws Exception {return readers(CompatibilityReport.Backend.HAL_AIDL);}
+ static java.util.List<String> readers(CompatibilityReport.Backend backend)throws Exception {
   requireShell();
   try {
-   String[] services=(String[])Class.forName("android.os.ServiceManager").getMethod("listServices").invoke(null);
-   java.util.List<String> aidl=ReaderDescriptor.instances(services);
-   if(!aidl.isEmpty())return aidl;
+   if(backend==CompatibilityReport.Backend.HAL_AIDL) {
+    String[] services=(String[])Class.forName("android.os.ServiceManager").getMethod("listServices").invoke(null);
+    return ReaderDescriptor.instances(services);
+   }
+   if(backend==CompatibilityReport.Backend.HAL_HIDL) {
+    ClassLoader loader=new dalvik.system.PathClassLoader(dexPath(),SystemHalAdapter.class.getClassLoader());
+    Class.forName("android.hardware.secure_element.V1_0.ISecureElement",true,loader);
+    // The native platform merges vendor/ODM manifest fragments. Do not guess SIM1/SIM2
+    // or require the optional Java HIDL service-manager classes.
+    String[] declarations=(String[])Class.forName("android.os.VintfObject").getMethod("report").invoke(null);
+    return HidlManifestReaders.parse(declarations);
+   }
+   if(backend==CompatibilityReport.Backend.TELEPHONY)return telephonyReaders();
    Object binder=service("secure_element");
    if(binder==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
    Object omapi=asInterface("android.se.omapi.ISecureElementService",binder);
@@ -39,9 +50,9 @@ final class SystemHalAdapter {
   } catch(ClassNotFoundException|NoSuchMethodException error) {
    throw new SecureElementFailure(SecureElementFailure.Reason.SYSTEM_INTERFACE_UNAVAILABLE);
   } catch(java.lang.reflect.InvocationTargetException error) {
-   if(error.getTargetException() instanceof SecurityException)
-    throw new SecureElementFailure(SecureElementFailure.Reason.ACCESS_DENIED);
-   throw error;
+   Throwable cause=error.getTargetException();
+   if(cause instanceof SecurityException)throw new SecureElementFailure(SecureElementFailure.Reason.ACCESS_DENIED);
+   throw new SecureElementFailure(SecureElementFailure.Reason.SERVICE_UNREACHABLE);
   }
  }
  static SecureElementTransport connectForLifecycle(String reader,ProfileLifecycleGuard.Operation op,String id,String nickname)throws Exception {
@@ -86,6 +97,16 @@ final class SystemHalAdapter {
   requireShell();
   if(!ReaderDescriptor.valid(reader))throw new SecurityException("Invalid reader");
   try {
+   if(reader.startsWith(ReaderDescriptor.HIDL_PREFIX)) {
+    ClassLoader loader=new dalvik.system.PathClassLoader(dexPath(),SystemHalAdapter.class.getClassLoader());
+    String name="android.hardware.secure_element.V1_0.ISecureElement";
+    Class<?> api=Class.forName(name,true,loader);
+    Class<?> callback=Class.forName(name+"$openLogicalChannelCallback",true,loader);
+    api.getMethod("isCardPresent");api.getMethod("openLogicalChannel",java.util.ArrayList.class,byte.class,callback);
+    api.getMethod("transmit",java.util.ArrayList.class);api.getMethod("closeChannel",byte.class);
+    Object hal=api.getMethod("getService",String.class,boolean.class).invoke(null,reader.substring(ReaderDescriptor.HIDL_PREFIX.length()),false);
+    return new HidlSecureElementTransport(hal,api,callback);
+   }
    if(reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX)) {
     int[] address=ReaderDescriptor.telephonyIndices(reader);
     Object phone=service("phone");
@@ -116,6 +137,8 @@ final class SystemHalAdapter {
    ClassLoader loader=new dalvik.system.PathClassLoader(dexPath(),SystemHalAdapter.class.getClassLoader());
    String name="android.hardware.secure_element.ISecureElement";
    Class<?> api=Class.forName(name,true,loader);
+   api.getMethod("isCardPresent");api.getMethod("openLogicalChannel",byte[].class,byte.class);
+   api.getMethod("transmit",byte[].class);api.getMethod("closeChannel",byte.class);
    Object hal=Class.forName(name+"$Stub",true,loader).getMethod("asInterface",android.os.IBinder.class).invoke(null,binder);
    return new AidlSecureElementTransport(hal,api);
   } catch(ClassNotFoundException|NoSuchMethodException error) {
@@ -129,23 +152,23 @@ final class SystemHalAdapter {
  static java.util.List<String> telephonyReaders()throws Exception {
   requireShell();
   java.util.List<String> readers=new java.util.ArrayList<>();
-  Object binder=service("phone");if(binder==null)return readers;
+  Object binder=service("phone");if(binder==null)throw new SecureElementFailure(SecureElementFailure.Reason.NO_SERVICE);
   String name="com.android.internal.telephony.ITelephony";
   Class<?> api=Class.forName(name),request=Class.forName("com.android.internal.telephony.IccLogicalChannelRequest");
-  api.getMethod("iccOpenLogicalChannel",request);
+  api.getMethod("iccOpenLogicalChannel",request);api.getMethod("iccCloseLogicalChannel",request);
   api.getMethod("iccTransmitApduLogicalChannelByPort",int.class,int.class,int.class,int.class,int.class,int.class,int.class,int.class,String.class);
   Object phone=asInterface(name,binder);
   Object[] slots=(Object[])api.getMethod("getUiccSlotsInfo",String.class).invoke(phone,"com.android.shell");
-  if(slots==null||slots.length>8)throw new SecurityException("Invalid slot inventory");
+  if(slots==null||slots.length>8)throw new SecureElementFailure(SecureElementFailure.Reason.INVALID_READER_INVENTORY);
   for(int slot=0;slot<slots.length;slot++){
    Object info=slots[slot];if(info==null||(Integer)info.getClass().getMethod("getCardStateInfo").invoke(info)!=2)continue;
    java.util.Collection<?> ports=(java.util.Collection<?>)info.getClass().getMethod("getPorts").invoke(info);
-   if(ports==null||ports.size()>8)throw new SecurityException("Invalid port inventory");
+   if(ports==null||ports.size()>8)throw new SecureElementFailure(SecureElementFailure.Reason.INVALID_READER_INVENTORY);
    for(Object port:ports){
     if(!(Boolean)port.getClass().getMethod("isActive").invoke(port))continue;
     int index=(Integer)port.getClass().getMethod("getPortIndex").invoke(port);
     String reader=ReaderDescriptor.TELEPHONY_PREFIX+slot+"."+index;ReaderDescriptor.telephonyIndices(reader);
-    if(readers.contains(reader))throw new SecurityException("Duplicate physical reader");
+    if(readers.contains(reader))throw new SecureElementFailure(SecureElementFailure.Reason.INVALID_READER_INVENTORY);
     readers.add(reader);
    }
   }

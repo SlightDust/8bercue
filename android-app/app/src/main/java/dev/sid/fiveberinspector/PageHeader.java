@@ -18,7 +18,7 @@ final class PageHeader extends LinearLayout {
     setPadding(dp(24), dp(8), dp(24), dp(8));
     setMinimumHeight(dp(64));
     if (back != null)
-      addView(slot(activity, "‹", backLabel, back), new LayoutParams(dp(48), dp(48)));
+      addView(slot(activity, "back", backLabel, back), new LayoutParams(dp(48), dp(48)));
     TextView heading = label(activity, title, 22, MainActivity.TEXT);
     heading.setAccessibilityHeading(true);
     LayoutParams titleParams = new LayoutParams(0, -2, 1);
@@ -26,7 +26,7 @@ final class PageHeader extends LinearLayout {
     if (settings != null) titleParams.rightMargin = dp(8);
     addView(heading, titleParams);
     if (settings != null)
-      addView(slot(activity, "⚙", "Settings", settings), new LayoutParams(dp(48), dp(48)));
+      addView(slot(activity, "settings", "Settings", settings), new LayoutParams(dp(48), dp(48)));
   }
   private View slot(Activity activity, String glyph, String description, Runnable click) {
     if (click == null) {
@@ -34,13 +34,10 @@ final class PageHeader extends LinearLayout {
       spacer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
       return spacer;
     }
-    Button button = new Button(activity);
-    // Navigation glyphs are icons inside a fixed 48dp accessible target. Keep
-    // their icon size stable while ordinary labels follow the user's font scale.
-    button.setText(glyph);button.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, glyph.equals("‹") ? 32 : 24);
-    button.setTextColor(MainActivity.TEXT);button.setAllCaps(false);
-    button.setContentDescription(description);button.setPadding(0, 0, 0, 0);
-    button.setMinWidth(0);button.setMinHeight(0);button.setStateListAnimator(null);button.setElevation(0);
+    ImageButton button = new ImageButton(activity);
+    button.setImageDrawable(new UiIcon(glyph,MainActivity.TEXT));
+    button.setContentDescription(description);button.setPadding(dp(12),dp(12),dp(12),dp(12));
+    button.setMinimumWidth(0);button.setMinimumHeight(0);button.setStateListAnimator(null);button.setElevation(0);
     android.util.TypedValue ripple = new android.util.TypedValue();
     activity.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, ripple, true);
     button.setBackgroundResource(ripple.resourceId);

@@ -1,6 +1,6 @@
 # Check a new phone
 
-Use the APK and `bootstrap_companion.py` from the **same candidate delivery**. The published Beta retains older compatibility limits. The current candidate installs on ARM64 Android 9+; actual card access depends on the phone's interfaces and permissions. No Shizuku app is required or offered.
+Use the signed APK from the candidate delivery. Copy its connection command from the installed app; no separate bootstrap download is required. The published Beta retains older compatibility limits. The current candidate installs on ARM64 Android 9+; actual card access depends on the phone's interfaces and permissions. No Shizuku app is required or offered.
 
 ## Connect once using USB ADB
 
@@ -11,11 +11,9 @@ Use the APK and `bootstrap_companion.py` from the **same candidate delivery**. T
 
    Replace SERIAL with the target serial. If Android reports a signing conflict, stop and preserve the existing app/data/safety history; do not uninstall or clear data as a shortcut. Package signatures are shared across Android user profiles; any additional work/private-space registration must be included in an explicitly approved migration scope.
    Some ROMs reject `adb install` with `INSTALL_FAILED_USER_RESTRICTED` without showing a prompt. That is an installation policy, not a card-access result. You can copy the same APK to Downloads and open it in the normal system package installer. Preserve its hash/signature; do not remove an existing installation or disable security protections to hide a failure.
-3. Open 8bercue and choose **Connect using computer**. Keep **Waiting for computer** open, then run within two minutes:
+3. Open 8bercue and choose **Connect using computer**. Keep **Waiting for computer** open, then choose **Copy ADB command** and run it in the computer terminal within two minutes. If several phones are attached, use `adb -s SERIAL shell` for the intended phone.
 
-       python3 bootstrap_companion.py --serial SERIAL
-
-   If ADB is not in PATH, append `--adb /absolute/path/to/adb`. The script uses the selected serial for every device command. It neither installs the app nor changes cards or communication settings. USB is the default; it does not enable wireless debugging.
+   If ADB is not in PATH, replace the initial `adb` with its absolute executable path. The connection command does not install the app, change profiles or enable wireless debugging.
 4. If several readable cards are found, choose **Choose card** and verify the physical slot/port and masked EID suffix before selecting the intended eUICC. The built-in card and removable card are distinct assets. A choice lasts only for the current Shell service session; a missing or changed selected card stops access instead of selecting an alternative.
 5. Keep the app open until the profile read finishes. A successful Binder handoff only proves the app-to-Shell connection; it does not prove card access.
 

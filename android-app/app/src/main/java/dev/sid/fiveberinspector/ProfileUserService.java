@@ -14,6 +14,7 @@ public final class ProfileUserService extends IProfileService.Stub {
         this.transport=transport;
         try {ServiceCaller.pinInstallation();} catch(Exception invalid){throw new SecurityException("Invalid service installation",invalid);}
     }
+    private final String uiSession = OperationTokens.create();
     private CardChoicePlan pendingCardChoice;
     private String displayedFingerprint;
     private String displayedCard;
@@ -102,7 +103,7 @@ public final class ProfileUserService extends IProfileService.Stub {
             java.util.List<ProfileLifecycleGuard.Row> policyRows=PortableProfileLifecycle.rows(entries);
             for (CardProfileInventory.Entry entry : entries) {
                 String id = entry.iccid;
-                profiles.put(new JSONObject().put("provider", safeLabel(entry.provider))
+                profiles.put(new JSONObject().put("selectionId",ProfileUiIdentity.key(uiSession,target.identityHash,id)).put("provider", safeLabel(entry.provider))
                     .put("name", safeLabel(entry.name)).put("nickname", safeLabel(entry.nickname))
                     .put("state", entry.enabled ? "enabled" : "disabled")
                     .put("iccidMasked", id.substring(0,4) + "..." + id.substring(id.length()-4))
@@ -118,7 +119,8 @@ public final class ProfileUserService extends IProfileService.Stub {
             displayedLifecycleFingerprint = null;
             try { displayedLifecycleFingerprint = ProfileLifecycleGuard.selectionFingerprint(PortableProfileLifecycle.rows(entries)); }
             catch (SecurityException unsupportedMutationState) { /* Still display an empty/inactive card for recovery. */ }
-            reply.put("profiles", profiles).put("count", profiles.length()).put("writeQualified",writeQualified);
+            reply.put("profiles", profiles).put("count", profiles.length()).put("writeQualified",writeQualified)
+                .put("reader",target.reader).put("eidMasked",target.eidMasked).put("description",SystemHalAdapter.describeReader(target.reader));
             reply.put("connectionMethod","adb_shell");
             reply.put("transport",transport+" UID2000 / "+target.reader);
             CompatibilityReport compatibility=FiveberReaderSelector.compatibilityReport();

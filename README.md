@@ -12,7 +12,7 @@
   <a href="https://github.com/sidnvy/8bercue/issues">Feedback</a>
 </p>
 
-Manage profiles on compatible removable eUICC cards, including 5ber, from a clean Android interface. No 5ber account required.
+Manage profiles on compatible eUICCs, including removable cards such as 5ber, from a clean Android interface. No 5ber account required.
 
 <p align="center">
   <img src="docs/images/profiles.png" width="260" alt="Profile list showing installed eSIMs and their status">
@@ -26,7 +26,7 @@ Manage profiles on compatible removable eUICC cards, including 5ber, from a clea
 - Rename, enable, disable and delete profiles.
 - Add an eSIM by scanning a QR code, importing an image or entering an activation code.
 - Connect through a computer using ADB.
-- Review changes before applying them, with recovery tools for interrupted operations.
+- Confirm installation and deletion, with recovery tools for interrupted operations.
 
 ## Get started
 
@@ -40,13 +40,9 @@ Connect once with a computer using **ADB**. No separate privilege-manager app is
 2. Open 8bercue and choose **Connect using computer**.
 3. Open **Compatibility check** and confirm the selected channel and a fresh profile list before making changes. See [testing a new phone](docs/NEW_DEVICE_CHECK.md).
 
-For the computer connection, download `bootstrap_companion.py` from the same release and run:
+On the connection screen, choose **Copy ADB command** and run it in your computer’s terminal within two minutes. The command starts the authenticated Shell service bundled in the installed APK; no Python script or separate helper app is required. If several devices are attached, use `adb -s SERIAL shell` for the intended phone. 8bercue confirms the connection and checks card access automatically.
 
-```sh
-python3 bootstrap_companion.py --serial YOUR_DEVICE_SERIAL --adb /path/to/adb
-```
-
-For an existing wireless ADB connection, add `--allow-existing-wireless`.
+Manage the selected card from the profile list. Open a profile to turn it on/off, rename it or delete it. Switching and saving a nickname execute directly; installation and deletion require confirmation. Enabled profiles must be turned off before deletion. Connection, compatibility and recovery details are in Settings.
 
 Currently in **Beta**. See the [release notes](https://github.com/sidnvy/8bercue/releases/tag/v0.18.0-beta.1) for setup details, migration guidance and known issues.
 

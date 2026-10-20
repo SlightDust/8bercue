@@ -14,9 +14,16 @@ import org.json.*;
 
 /** Three-screen local manager. No credential or transaction replay on recreation. */
 public final class MainActivity extends Activity {
-  static final int BG = 0xffffffff, SURFACE = 0xfff7f7f5, TEXT = 0xff262626, MUTED = 0xff686868,
-                   ACCENT = 0xffc84b14;
-  private static final int LINE = 0xffe8e8e5;
+  static int BG, SURFACE, TEXT, MUTED, ACCENT, LINE, TONAL, ON_TONAL, ERROR;
+  private boolean darkTheme;
+  private int selectedProfile = -1;
+  private String selectedIccid = "", selectedProfileKey = "";
+  private JSONObject detailProfile;
+  private String connectionCommand = "";
+  private long connectionDeadline;
+  private boolean connectionExpired;
+  private boolean restoreDetailAfterRead;
+  private final java.util.ArrayList<String> recentResults = new java.util.ArrayList<>();
   private static final int QR = 40, IMAGE = 41;
   private static final ExecutorService WORK = Executors.newSingleThreadExecutor();
   private static final UiOperationState OPERATIONS = new UiOperationState();
@@ -30,11 +37,8 @@ public final class MainActivity extends Activity {
   private TextView statusTitle, statusDetail;
   private EditText activation, confirmation;
   private final AddDraft draft = new AddDraft();
-  // Profile UI stays in the Activity accessibility tree, not a separate Dialog.
-  private final ProfileDetailSession profileSelection = new ProfileDetailSession();
-  private View profilePanel;
-  private boolean profilePreview;
-  private final java.util.ArrayList<View> profilePanelControls = new java.util.ArrayList<>();
+  private final ProfileDetailSession detailSelection = new ProfileDetailSession();
+  private final java.util.IdentityHashMap<View,Boolean> controlAvailability = new java.util.IdentityHashMap<>();
   private Dialog installResultDialog;
   private Dialog activeSheet;
   private Dialog bootstrapSheet;
@@ -79,6 +83,7 @@ public final class MainActivity extends Activity {
           importImage(uri);
         }
       }
+      if(screen==6 && !connectionExpired && backend==null && android.os.SystemClock.elapsedRealtime()>=connectionDeadline){connectionExpired=true;status("Connection window expired","Start again to create a fresh connection window.");render();}
       handler.postDelayed(this, 1000);
     }
   };
@@ -88,11 +93,11 @@ public final class MainActivity extends Activity {
     if (Build.VERSION.SDK_INT >= 33)
       getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
           android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::handleBack);
+    applyPalette();
     getWindow().setStatusBarColor(BG);
     getWindow().setNavigationBarColor(BG);
-    getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
     if (saved != null)
-      screen = saved.getInt("screen", 0);
+      screen = saved.getInt("screen", 0) == 2 ? 2 : 0;
     if (getPreferences(0).getBoolean("pending", false))
       notice = "Card and operation state need verification. Open Settings → Verify card and recovery. "
           + "Do not submit its activation code again.";
@@ -110,11 +115,10 @@ public final class MainActivity extends Activity {
   protected void onPause() {
     resumed = false;
     if(screen==1){clearCredentials();draft.changed();if(activeSheet!=null)activeSheet.dismiss();}
-    // Never carry a confirmation token or selection across backgrounding.
-    boolean wasPreview = profilePreview;
-    dismissProfilePanel();
-    if (wasPreview && !OPERATIONS.running())
-      statusPreservingOutcome("Review closed", "No nickname write submitted. Review again to proceed.");
+    // Invalidate pending prepare callbacks across any background/foreground boundary.
+    navigationSession++;
+    clearDetailSelection();
+    if(screen==3||screen==4)screen=0;
     handler.removeCallbacks(watch);
     super.onPause();
   }
@@ -135,11 +139,12 @@ public final class MainActivity extends Activity {
     try {
       service.asBinder().linkToDeath(()->runOnUiThread(()->{
         if(backend!=service)return;
-        backend=null;compatibility=new JSONObject();navigationSession++;dismissProfilePanel();
+        backend=null;compatibility=new JSONObject();navigationSession++;clearDetailSelection();
         statusPreservingOutcome("Connection lost", "Start the computer connection again. Pending operations will not be repeated.");render();
       }),0);
       backend=service;directManagement=true;companionManagement=true;fallback=false;
       if(bootstrapSheet!=null){bootstrapSheet.dismiss();bootstrapSheet=null;}
+      if(screen==6)screen=0;
       status("Connected", "Checking card and recovery state…");render();checkRecovery();
     }catch(Exception unavailable){backend=null;compatibility=new JSONObject();}
   }
@@ -149,14 +154,13 @@ public final class MainActivity extends Activity {
     try {CompanionBinderProvider.beginManagementBootstrap();}
     catch(SecurityException active){backend=null;compatibility=new JSONObject();connectDirect();return;}
     backend=null;compatibility=new JSONObject();fallback=false;binderReadOnlyInventory=false;directManagement=true;companionManagement=true;
-    navigationSession++;dismissProfilePanel();
+    navigationSession++;clearDetailSelection();
 
-    Sheet help=new Sheet("Connect using your computer");
-    help.copy("Connect and authorize this phone with Android platform tools. Within two minutes, run the supplied bootstrap_companion.py with this phone's serial. Keep 8bercue open. No card changes happen during connection.");
-    help.copy("Reconnect after a reboot, app update or service termination. Keep this app open during setup.");
-    bootstrapSheet=help.dialog;
-    help.button("Waiting for computer",false,help.dialog::dismiss);help.show();
+    try { connectionCommand=ConnectionCommand.forApk(getApplicationInfo().sourceDir); }
+    catch(IllegalArgumentException invalid){status("Command unavailable","Reinstall the verified APK before connecting.");render();return;}
+    connectionDeadline=android.os.SystemClock.elapsedRealtime()+120000;connectionExpired=false;statusPreservingOutcome("Waiting for computer","Copy the command below and run it within two minutes.");screen=6;render();
   }
+
   private boolean useCompanion() {
     return LabSupport.socketEligible()
         && getPreferences(0).getBoolean("preferCompanion", true);
@@ -168,7 +172,7 @@ public final class MainActivity extends Activity {
   private void connect() {
     if (!managementUnavailable().isEmpty()) { status("Device not supported by this build",managementUnavailable());return; }
     connectExistingCompanion();
-    if(backend==null)status("Connect your card","Choose Connect using computer and run the matching ADB setup script.");
+    if(backend==null)status("Connect your card","Choose Connect using computer and copy and run its ADB command.");
   }
   private interface Job {
     JSONObject run() throws Exception;
@@ -282,7 +286,7 @@ public final class MainActivity extends Activity {
           if (r.optBoolean("transportUnavailable", false)) {
             // A missing legacy socket must not change connection modes or replay an operation.
             status("Companion unavailable",
-                "Use Connect using computer and run the supplied ADB setup script.");
+                "Use Connect using computer and copy and run the ADB command shown in the app.");
             return;
           }
           fallback = true;
@@ -316,7 +320,7 @@ public final class MainActivity extends Activity {
         () -> s != null ? new JSONObject(s.listProfiles()) : ShellCompanionClient.list(), r -> {
           compatibility=r.optJSONObject("compatibility")==null?new JSONObject():r.optJSONObject("compatibility");
           if (!r.optBoolean("ok", true)) {
-            inventory=new JSONObject();notificationCleanupAvailable=false;dismissProfilePanel();
+            inventory=new JSONObject();notificationCleanupAvailable=false;clearDetailSelection();
             String limitation=SecureElementFailure.message(r.optString("capabilityError", ""));
             status("Card unavailable", (limitation.isEmpty()
                 ? "No verified inventory was returned. Reconnect and refresh." : limitation)+
@@ -324,6 +328,13 @@ public final class MainActivity extends Activity {
             render();return;
           }
           inventory = r;
+          if (screen==3 || screen==4 || restoreDetailAfterRead) {
+            JSONArray rows=inventory.optJSONArray("profiles");int found=-1;
+            if(rows!=null)for(int i=0;i<rows.length();i++)if(rows.optJSONObject(i)!=null&&!selectedProfileKey.isEmpty()&&selectedProfileKey.equals(rows.optJSONObject(i).optString("selectionId"))) {if(found!=-1){found=-1;break;}found=i;}
+            if(found>=0){selectedProfile=found;detailProfile=rows.optJSONObject(found);detailSelection.open(inventory,backend,detailProfile,found);screen=3;}
+            else {selectedProfile=-1;detailProfile=null;screen=0;}
+            restoreDetailAfterRead=false;
+          }
           statusPreservingOutcome(
               "Card connected", r.optString("connectionNotice", "Enabled on card does not confirm cellular network registration."));
           render();
@@ -335,8 +346,12 @@ public final class MainActivity extends Activity {
       return;
     run("Checking recovery", false, () -> new JSONObject(s.getOperationStatus()), r -> {
       if (!r.optBoolean("ok", false)) {
+        if(RecoveryUiPolicy.needsCardChoice(r.optString("capabilityError",""))){
+          inventory=new JSONObject();notificationCleanupAvailable=false;clearDetailSelection();
+          statusPreservingOutcome("Choose a card","More than one eUICC is readable. Select the card you want to manage.");render();return;
+        }
         getPreferences(0).edit().putBoolean("pending", true).commit();
-        inventory = new JSONObject();notificationCleanupAvailable = false;dismissProfilePanel();
+        inventory = new JSONObject();notificationCleanupAvailable = false;clearDetailSelection();
         String limitation=SecureElementFailure.message(r.optString("capabilityError", ""));
         status("Recovery state unavailable", limitation.isEmpty()
             ? "Changes are blocked until the safety record can be checked. Do not clear app data or repeat the previous operation."
@@ -408,19 +423,11 @@ public final class MainActivity extends Activity {
             render();
             return;
           }
-          String warning = op.equals("delete")
-              ? "Permanently delete this eSIM? Its activation code may not be reusable. The "
-                  + "service will recheck the exact card and profile before deletion."
-              : op.equals("rename") ? "Save nickname: " + mask(nickname) + "?"
-              : op.equals("disable")
-              ? "Disable this eSIM and leave this card with no enabled profile? This stops service for this eSIM. Keep another connection available. Other cards are not part of this operation."
-              : "This changes the active eSIM and can interrupt cellular service. Have another way "
-                  + "to connect. Recovery is not guaranteed.";
-          status("Preview ready", "No changes made. Review the action, then confirm or cancel.");
-          if ("rename".equals(op)) {
-            showInlineRenamePreview(index, nickname, r, s, token);
-            return;
+          if (ProfileActionPolicy.executesDirectly(op)) {
+            execute(s,token,op);return;
           }
+          String warning = "This permanently removes the selected profile from this card. Its activation code may not work again.";
+          status("Review deletion", "Check the selected card and profile before deleting.");
           final boolean[] confirmed = {false};
           Sheet preview = new Sheet(op.equals("switch") ? "Activate eSIM?" : op.equals("delete") ? "Delete eSIM?" : op.equals("disable") ? "Disable eSIM?" : "Save nickname?");
           if (op.equals("switch")) preview.fact("Currently enabled", r.optString("from", "").isEmpty() ? "None on this card" : r.optString("from"));
@@ -483,7 +490,10 @@ public final class MainActivity extends Activity {
             getPreferences(0).edit().putBoolean("pending", true).commit();
             notice += "\nReconnect the local service using your computer and verify the card before another operation.";
           }
-          screen = 0;
+          recentResults.add(0, (verified && !review ? "Verified: " : "Needs review: ") + op);
+          if(recentResults.size()>20)recentResults.remove(20);
+          restoreDetailAfterRead=verified && !review && ProfileActionPolicy.executesDirectly(op);
+          screen = restoreDetailAfterRead ? 3 : 0;
           render();
           refresh();
           if (op.equals("download") && verified && !review) showInstalledResult();
@@ -566,10 +576,12 @@ public final class MainActivity extends Activity {
     if (confirmation != null) confirmation.setText("");
   }
   private void navigate(int destination) {
+    if(OPERATIONS.running())return;
     if (screen == 1 && destination != 1) { clearCredentials();pendingImport = null;draft.changed(); }
     navigationSession++;
     if (destination != 1) { draft.form = false;showConfirmation = false; }
     if (!getPreferences(0).getBoolean("pending", false)) { notice = "";title = backend != null ? "Card connected" : "Connect your card";detail = backend != null ? "" : "Connect using your computer."; }
+    selectedProfile=-1;selectedIccid="";selectedProfileKey="";detailProfile=null;
     screen = destination;
     render();
   }
@@ -578,21 +590,17 @@ public final class MainActivity extends Activity {
     return super.onKeyUp(keyCode, event);
   }
   private void handleBack() {
-    if (profilePanel != null) {
-      boolean wasPreview = profilePreview;
-      dismissProfilePanel();
-      if (wasPreview) status("Review cancelled", "No nickname write submitted.");
-      return;
-    }
+    if(OPERATIONS.running())return;
+    if(screen==4){screen=3;navigationSession++;render();return;}
     if (screen == 1 && draft.form) { clearCredentials();activation = null;confirmation = null;draft.form = false;showConfirmation = false;pendingImport = null;draft.changed();navigationSession++;render(); }
     else if (screen != 0) navigate(0);
     else finish();
   }
   private void render() {
     if (destroyed) return;
-    dismissProfilePanel(); // A fresh render discards stale Profile actions.
+    controlAvailability.clear();
     taskControls.clear();
-    if (screen == 1) {
+    if (screen == 1 || screen == 4) {
       if (activation != null) draft.activation = activation.getText().toString();
       if (confirmation != null) draft.confirmation = confirmation.getText().toString();
       getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
@@ -604,7 +612,7 @@ public final class MainActivity extends Activity {
     root.setBackgroundColor(BG);
     PageHeader.applyInsets(root);
     root.addView(new PageHeader(this,
-        screen == 0 ? "My eSIMs" : screen == 1 ? "Add eSIM" : "Settings",
+        screen == 0 ? "8bercue" : screen == 1 ? "Add eSIM" : screen == 3 ? "eSIM details" : screen == 4 ? "Rename eSIM" : screen == 5 ? "Operation records" : screen == 6 ? "Connect your phone" : "Settings",
         screen == 1 && draft.form ? "Back to add methods" : "Back to My eSIMs",
         screen == 0 ? null : this::handleBack,
         screen == 0 ? () -> navigate(2) : null));
@@ -614,7 +622,14 @@ public final class MainActivity extends Activity {
     content.setOrientation(LinearLayout.VERTICAL);
     content.setPadding(dp(24), 0, dp(24), dp(36));
     scroll.addView(content);
-    root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    FrameLayout workspace=new FrameLayout(this);
+    workspace.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
+    root.addView(workspace,new LinearLayout.LayoutParams(-1,0,1));
+    if(screen==0&&inventory.has("profiles")&&!binderReadOnlyInventory){
+      Button fab=action("+  Add eSIM",false,()->navigate(1));fab.setTextColor(ON_TONAL);fab.setBackground(rounded(TONAL,16));fab.setElevation(dp(2));
+      FrameLayout.LayoutParams placement=new FrameLayout.LayoutParams(-2,dp(56),Gravity.BOTTOM|Gravity.END);placement.setMargins(dp(24),dp(16),dp(24),dp(16));workspace.addView(fab,placement);availability(fab,!getPreferences(0).getBoolean("pending",false));
+      content.setPadding(dp(24),0,dp(24),dp(100));
+    }
     setContentView(root);
     statusBox = box();
     statusBox.setPadding(dp(16), dp(14), dp(16), dp(14));
@@ -634,71 +649,78 @@ public final class MainActivity extends Activity {
     updateStatusRegion();
     if (screen == 0) home();
     else if (screen == 1) addScreen();
+    else if(screen==3) profileDetails();
+    else if(screen==4) renameScreen();
+    else if(screen==5) recordsScreen();
+    else if(screen==6) connectionScreen();
     else settings();
     updateStatusRegion();
   }
   private void home() {
     if (!managementUnavailable().isEmpty()) {
-      add(text("Device not supported by this build", 20, TEXT, true), 28);
-      add(text(managementUnavailable(), 15, MUTED, false), 10);
-      add(text("You can still read setup, privacy and licensing information in Settings.", 14, MUTED, false), 16);return;
+      add(text("Installation supported; management unavailable",20,TEXT,true),24);
+      add(text(managementUnavailable()),12);return;
     }
-    if(compatibility.length()>0)add(action("Card connection: "+compatibility.optString("route","Not verified")+"  ›",false,this::showCompatibility),12);
-    if (binderReadOnlyInventory)
-      add(text("Read-only Binder inventory · profile editing requires a separately authorized management connection.", 13, MUTED, false), 18);
-    else add(action("+  Add eSIM", true, () -> navigate(1)), 18);
-    JSONArray profiles = inventory.optJSONArray("profiles");
-    LinearLayout heading = new LinearLayout(this);
-    heading.setGravity(Gravity.CENTER_VERTICAL);
-    heading.addView(text("Your profiles", 18, TEXT, true), new LinearLayout.LayoutParams(0, dp(52), 1));
-    Button refresh = action("Refresh", false, this::refresh);
-    refresh.setBackgroundColor(BG);
-    refresh.setTextColor(MUTED);
-    heading.addView(refresh, new LinearLayout.LayoutParams(dp(90), dp(48)));
-    add(heading, 22);
-    if (profiles == null) {
-      add(text("Your eSIMs will appear here", 20, TEXT, true), 28);
-      add(text(backend!=null?"Check compatibility or choose the card you intend to manage.":"Connect your phone using a computer to check its available card channels.", 15, MUTED, false), 10);
-      if(backend!=null)add(action("Choose card",true,this::chooseCard),20);
-      else add(action("Connect using computer", true, this::beginDirectBootstrap), 20);
-      return;
+    LinearLayout card=box();
+    Button choice=button(cardLabel()+" · Choose",false);
+    choice.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
+    choice.setTextSize(18);choice.setTextColor(TEXT);
+    choice.setBackgroundColor(Color.TRANSPARENT);
+    choice.setOnClickListener(v->{if(backend!=null)chooseCard();else beginDirectBootstrap();});
+    taskControls.add(choice);card.addView(choice,new LinearLayout.LayoutParams(-1,-2));
+    card.addView(text("EID "+inventory.optString("eidMasked","Not checked"),12,MUTED,false),margin(4));
+    card.addView(text(inventory.has("profiles")?"Card connected · Read verified":"Connect to check this card",12,MUTED,false),margin(14));
+    add(card,18);
+    LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
+    heading.addView(text("Your eSIMs",22,TEXT,false),new LinearLayout.LayoutParams(0,-2,1));
+    Button refresh=action("Refresh",false,this::refresh);refresh.setTextSize(13);refresh.setBackgroundColor(Color.TRANSPARENT);
+    heading.addView(refresh,new LinearLayout.LayoutParams(dp(88),dp(48)));add(heading,22);
+    JSONArray profiles=inventory.optJSONArray("profiles");
+    if(profiles==null){add(text(backend==null?"Your eSIMs will appear here.":"Choose a card or check compatibility in Settings."),16);add(action(backend==null?"Connect using computer":"Choose card",true,backend==null?this::beginDirectBootstrap:this::chooseCard),20);return;}
+    for(int i=0;i<profiles.length();i++){
+      final int index=i;JSONObject profile=profiles.optJSONObject(i);if(profile==null)continue;
+      LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(96));row.setPadding(0,dp(16),0,dp(16));
+      TextView avatar=text(profileName(profile).substring(0,Math.min(2,profileName(profile).length())),16,ON_TONAL,true);avatar.setGravity(Gravity.CENTER);avatar.setBackground(rounded(TONAL,14));row.addView(avatar,new LinearLayout.LayoutParams(dp(44),dp(44)));
+      LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);labels.setPadding(dp(14),0,dp(8),0);
+      labels.addView(text(profileName(profile),16,TEXT,true));labels.addView(text(profile.optString("iccidMasked","Not reported"),12,MUTED,false),margin(4));row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+      boolean on="enabled".equalsIgnoreCase(profile.optString("state"));TextView state=text(on?"Enabled":"disabled".equalsIgnoreCase(profile.optString("state"))?"Disabled":"Unknown",11,on?ACCENT:MUTED,false);state.setPadding(dp(8),dp(4),dp(8),dp(4));state.setBackground(rounded(SURFACE,8));row.addView(state);
+      row.setContentDescription(profileName(profile)+", "+state.getText()+". View profile details");row.setFocusable(true);ripple(row);row.setOnClickListener(v->{if(!OPERATIONS.running())showProfile(index,profile,row);});taskControls.add(row);add(row,0);addDivider();
     }
-    for (int i = 0; i < profiles.length(); i++) {
-      final int index = i;
-      JSONObject profile = profiles.optJSONObject(i);
-      if (profile == null) continue;
-      LinearLayout row = new LinearLayout(this);
-      row.setGravity(Gravity.CENTER_VERTICAL);
-      row.setPadding(0, dp(21), 0, dp(21));
-      row.setMinimumHeight(dp(106));
-      LinearLayout labels = new LinearLayout(this);
-      labels.setOrientation(LinearLayout.VERTICAL);
-      String nickname = profile.optString("nickname", "");
-      String name = profileName(profile);
-      labels.addView(text(mask(name), 19, TEXT, true));
-      String subtitle = profileSubtitle(profile);
-      if (!subtitle.isEmpty()) labels.addView(text(subtitle, 14, MUTED, false), margin(3));
-      boolean enabled = "enabled".equalsIgnoreCase(profile.optString("state"));
-      String state = enabled ? "Enabled on card" : "disabled".equalsIgnoreCase(profile.optString("state")) ? "Disabled" : "State unknown";
-      labels.addView(text(state + "  ·  " + mask(profile.optString("iccidMasked", "Unavailable")), 12, enabled ? ACCENT : MUTED, false), margin(7));
-      row.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-      TextView arrow = text("›", 29, MUTED, false);
-      arrow.setGravity(Gravity.CENTER);
-      row.addView(arrow, new LinearLayout.LayoutParams(dp(32), dp(48)));
-      row.setContentDescription(name + ", " + state + ". View profile details");
-      row.setFocusable(true);
-      android.util.TypedValue ripple = new android.util.TypedValue();
-      getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
-      row.setBackgroundResource(ripple.resourceId);
-      row.setOnClickListener(v -> { if (!OPERATIONS.running()) showProfile(index, profile, row); });
-      taskControls.add(row);
-      add(row, 0);
-      addDivider();
-    }
-    if (profiles.length() == 0) add(text("No profiles yet. Add an eSIM to get started.", 16, MUTED, false), 22);
-    add(text("Network registration not checked. Enabled on card describes the eSIM's card state.", 12, MUTED, false), 20);
-    if (backend == null && (fallback || binderReadOnlyInventory)) add(text("Read-only connection. Connect an authorized management transport in Settings to edit profiles.", 13, MUTED, false), 12);
+    if(profiles.length()==0)add(text("No profiles yet. Add an eSIM to get started."),20);
+    add(text("Enabled describes the card state. Network service has not been checked.",12,MUTED,false),20);
+
   }
+  private String cardLabel(){String reader=inventory.optString("reader","");String description=inventory.optString("description","");return description.isEmpty()?(reader.isEmpty()?"Select an eUICC":reader+" · eUICC"):description;}
+  private void selectDetail(int index,JSONObject profile){selectedProfile=index;selectedIccid=profile.optString("iccidMasked","");selectedProfileKey=profile.optString("selectionId","");detailProfile=profile;detailSelection.open(inventory,backend,profile,index);screen=3;navigationSession++;render();}
+  private boolean detailCurrent(){JSONArray rows=inventory.optJSONArray("profiles");return backend!=null&&resumed&&!destroyed&&!OPERATIONS.running()&&rows!=null&&selectedProfile>=0&&rows.optJSONObject(selectedProfile)==detailProfile&&detailSelection.matches(inventory,backend,detailProfile,selectedProfile)&&!getPreferences(0).getBoolean("pending",false)&&!selectedIccid.isEmpty()&&!selectedProfileKey.isEmpty();}
+  private void profileDetails(){
+    JSONObject p=detailProfile;if(p==null){add(text("Refresh the card and select a profile."),24);return;}
+    add(text(cardLabel()+" · EID "+inventory.optString("eidMasked","Not reported"),12,MUTED,false),16);
+    add(text(profileName(p),28,TEXT,false),28);add(text(selectedIccid),6);
+    boolean enabled="enabled".equalsIgnoreCase(p.optString("state"));boolean disabled="disabled".equalsIgnoreCase(p.optString("state"));
+    Switch toggle=new Switch(this);toggle.setText("Use this eSIM");toggle.setTextSize(20);toggle.setTextColor(ON_TONAL);toggle.setPadding(dp(20),dp(18),dp(20),dp(18));toggle.setMinHeight(dp(80));toggle.setBackground(rounded(TONAL,24));toggle.setChecked(enabled);toggle.setContentDescription("Use this eSIM");
+    toggle.setThumbTintList(android.content.res.ColorStateList.valueOf(darkTheme?0xffffdbcC:Color.WHITE));toggle.setTrackTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{ACCENT,MUTED}));
+    boolean canEdit=backend!=null&&inventory.optBoolean("writeQualified",false)&&!getPreferences(0).getBoolean("pending",false);
+    availability(toggle,canEdit&&((enabled&&p.optBoolean("canDisable",false))||(disabled&&p.optBoolean("canEnable",false))));taskControls.add(toggle);
+    toggle.setOnClickListener(button->{toggle.setChecked(enabled);if(detailCurrent())prepare(enabled?"disable":"switch",selectedProfile,"");});add(toggle,28);
+    add(text(enabled?"Enabled on this card.":disabled?"Off. Turn on to use this eSIM.":"State unknown. Refresh before making changes."),14);
+    String active="";JSONArray rows=inventory.optJSONArray("profiles");if(rows!=null)for(int i=0;i<rows.length();i++){JSONObject other=rows.optJSONObject(i);if(other!=null&&"enabled".equalsIgnoreCase(other.optString("state")))active=profileName(other);}
+    add(text(enabled?"Turning this off leaves no eSIM enabled on this card.":active.isEmpty()?"Turning this on enables this eSIM on this card.":"Turning this on turns off "+active+" on this card.",13,MUTED,false),6);
+    Button rename=action("Rename",false,()->{if(detailCurrent()){screen=4;navigationSession++;render();}});availability(rename,canEdit&&p.optBoolean("canRename",false));add(rename,28);
+    Button delete=action("Delete eSIM",false,()->{if(detailCurrent())prepare("delete",selectedProfile,"");});delete.setTextColor(ERROR);availability(delete,canEdit&&disabled&&p.optBoolean("canDelete",false));add(delete,12);
+    if(enabled)add(text("Turn off this eSIM before deleting it.",12,MUTED,false),4);
+    if(!canEdit)add(text("Changes are unavailable until this card and its recovery state are verified.",13,MUTED,false),12);
+    add(text("About this eSIM",16,TEXT,true),28);detailFact("Operator",p.optString("provider",p.optString("name","Not reported")));detailFact("ICCID",selectedIccid);detailFact("Card",cardLabel());
+    add(text("Card state only. Network service has not been checked.",12,MUTED,false),20);
+  }
+  private void detailFact(String label,String value){LinearLayout row=new LinearLayout(this);row.setPadding(0,dp(14),0,dp(14));row.addView(text(label,13,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));TextView v=text(mask(value),13,TEXT,false);v.setGravity(Gravity.END);row.addView(v,new LinearLayout.LayoutParams(0,-2,2));add(row,0);addDivider();}
+  private void renameScreen(){if(detailProfile==null)return;add(text(cardLabel()+" · EID "+inventory.optString("eidMasked","Not reported"),12,MUTED,false),18);add(text(profileName(detailProfile)+" · "+selectedIccid),22);EditText name=input("Nickname",false);name.setText(detailProfile.optString("nickname",""));add(name,22);add(text("Leave blank to use the operator name.",12,MUTED,false),10);add(action("Save",true,()->{if(!detailCurrent())return;String value=name.getText().toString().trim();if(value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>64||value.matches("(?s).*[\\p{Cntrl}].*")){name.setError("Use at most 64 UTF-8 bytes without control characters");return;}hideKeyboard();prepare("rename",selectedProfile,value);}),28);add(action("Cancel",false,()->{screen=3;navigationSession++;render();}),8);}
+  private void recordsScreen(){add(text("Operation results",22,TEXT,false),24);add(text("This session’s results are shown here. Durable safety records remain in the Shell service; diagnostics omit profile identifiers."),12);for(String value:recentResults)add(text(value,16,TEXT,false),18);if(recentResults.isEmpty())add(text("No operations in this app session."),24);add(action("Verify card and recovery",false,this::reconcile),24);add(action("Export safe diagnostics",false,this::exportDiagnostics),12);}
+  private void connectionScreen(){add(text("Connect with ADB.",28,TEXT,false),28);add(text("One command on your computer. No extra script or app."),12);add(text("1. Connect this phone",18,TEXT,true),28);add(text("Enable USB debugging and authorize your trusted computer. If more than one device is connected, use adb -s SERIAL shell for this phone."),10);add(text("2. Copy and run the command",18,TEXT,true),28);TextView command=text(connectionCommand,12,TEXT,false);command.setTypeface(android.graphics.Typeface.MONOSPACE);command.setTextIsSelectable(true);command.setPadding(dp(16),dp(16),dp(16),dp(16));command.setBackground(rounded(SURFACE,12));add(command,14);Button copy=action("Copy ADB command",true,()->{android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);clipboard.setPrimaryClip(ClipData.newPlainText("8bercue ADB connection",connectionCommand));statusPreservingOutcome("Waiting for computer","Command copied. Run it within two minutes and keep this screen open.");});availability(copy,!connectionExpired);add(copy,18);if(connectionExpired)add(action("Start connection again",true,this::beginDirectBootstrap),12);add(text("3. Keep this screen open",18,TEXT,true),28);add(text("Connection completes automatically, then card access is checked. This command changes no profiles."),10);add(text("Reconnect after a reboot, app update or service termination. If the connection window expires, go back and start again.",12,MUTED,false),24);}
+  private GradientDrawable rounded(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
+  private void ripple(View v){android.util.TypedValue value=new android.util.TypedValue();getTheme().resolveAttribute(android.R.attr.selectableItemBackground,value,true);v.setBackgroundResource(value.resourceId);}
+  private void availability(View control,boolean allowed){controlAvailability.put(control,allowed);control.setEnabled(allowed&&!OPERATIONS.running());control.setAlpha(control.isEnabled()?1f:.45f);}
+  private void applyPalette(){darkTheme=getPreferences(0).getBoolean("darkTheme",(getResources().getConfiguration().uiMode&android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES);BG=darkTheme?0xff1a120e:0xfffff8f5;SURFACE=darkTheme?0xff261c17:0xfff5eae4;TEXT=darkTheme?0xfff6e5da:0xff292019;MUTED=darkTheme?0xffdbc1b2:0xff6c5b51;ACCENT=darkTheme?0xffffb596:0xffa9431d;LINE=darkTheme?0xff584136:0xffe5d4c9;TONAL=darkTheme?0xff7c2d0c:0xffffdbcc;ON_TONAL=darkTheme?0xffffdbcc:0xff3a0c00;ERROR=darkTheme?0xffffb4aa:0xffa52c2a;getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);getWindow().getDecorView().setSystemUiVisibility(darkTheme?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);}
   private final class Sheet {
     final Dialog dialog = new Dialog(MainActivity.this);
     final LinearLayout body = new LinearLayout(MainActivity.this);
@@ -731,7 +753,7 @@ public final class MainActivity extends Activity {
       }
       if (label.startsWith("Delete")) {
         b.setTextColor(primary ? Color.WHITE : 0xffb42318);
-        if (primary) { GradientDrawable red = new GradientDrawable();red.setColor(0xffb42318);red.setCornerRadius(dp(12));b.setBackground(red); }
+        if (primary) { GradientDrawable red = new GradientDrawable();red.setColor(0xffb42318);red.setCornerRadius(dp(28));b.setBackground(red); }
       }
       b.setOnClickListener(v -> { if (dismiss || !OPERATIONS.running()) click.run(); });
       body.addView(b, margin(16));
@@ -757,189 +779,24 @@ public final class MainActivity extends Activity {
     String n = mask(p.optString("name", ""));
     return n.equals(profileName(p)) ? "" : n;
   }
-  private boolean profileSelectionCurrent(int index, JSONObject profile) {
-    JSONArray profiles = inventory.optJSONArray("profiles");
-    return !destroyed && resumed && screen == 0 && !OPERATIONS.running()
-        && profiles != null && profiles.optJSONObject(index) == profile
-        && profileSelection.matches(inventory, backend, profile, index);
-  }
-  private void dismissProfilePanel() {
-    if (profilePanel != null && profilePanel.getParent() instanceof ViewGroup)
-      ((ViewGroup) profilePanel.getParent()).removeView(profilePanel);
-    profilePanel = null;
-    profilePreview = false;
-    taskControls.removeAll(profilePanelControls);
-    profilePanelControls.clear();
-    profileSelection.clear();
-  }
-  private LinearLayout newProfilePanel(String heading) {
-    LinearLayout panel = box();
-    panel.setAccessibilityPaneTitle(heading);
-    panel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-    TextView header = text(heading, 20, TEXT, true);
-    header.setAccessibilityHeading(true);
-    panel.addView(header);
-    return panel;
-  }
-  private void profileCopy(LinearLayout panel, String value) {
-    panel.addView(text(value, 14, MUTED, false), margin(12));
-  }
-  private void profileFact(LinearLayout panel, String label, String value) {
-    panel.addView(text(label, 12, MUTED, false), margin(12));
-    panel.addView(text(mask(value), 16, TEXT, false), margin(3));
-  }
-  private void profileAction(LinearLayout panel, String label, boolean primary, Runnable click) {
-    Button b = button(label, primary);
-    b.setEnabled(!OPERATIONS.running());
-    b.setAlpha(OPERATIONS.running() ? .45f : 1f);
-    profilePanelControls.add(b);
-    taskControls.add(b);
-    b.setOnClickListener(v -> {
-      if (profilePanel == panel && !destroyed && resumed && !OPERATIONS.running())
-        click.run();
-    });
-    panel.addView(b, margin(12));
-  }
-  private void attachProfilePanel(LinearLayout panel, View anchor, boolean preview) {
-    if (destroyed || !resumed || screen != 0) {
-      profileSelection.clear();
-      return;
-    }
-    int position = anchor != null && anchor.getParent() == content
-        ? content.indexOfChild(anchor) + 1 : Math.min(1, content.getChildCount());
-    content.addView(panel, position, margin(12));
-    profilePanel = panel;
-    profilePreview = preview;
-    // Accessibility services observe the actions in the same Activity window
-    // as their Profile row; no separate Dialog window is required.
-    panel.post(() -> {
-      if (profilePanel == panel && !destroyed && resumed) {
-        panel.sendAccessibilityEvent(
-            android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
-        if (content.getParent() instanceof ScrollView)
-          ((ScrollView) content.getParent()).smoothScrollTo(0, Math.max(0, panel.getTop() - dp(24)));
-      }
-    });
-  }
+  private void clearDetailSelection(){detailSelection.clear();selectedProfile=-1;selectedIccid="";selectedProfileKey="";detailProfile=null;}
   private void showProfile(int index, JSONObject profile, View row) {
-    JSONArray profiles = inventory.optJSONArray("profiles");
-    if (destroyed || !resumed || OPERATIONS.running() || screen != 0
-        || row.getParent() != content || profiles == null || profiles.optJSONObject(index) != profile)
-      return;
-    if (profilePanel != null && profileSelection.matches(inventory, backend, profile, index)) {
-      dismissProfilePanel();
-      return;
-    }
-    dismissProfilePanel();
-    profileSelection.open(inventory, backend, profile, index);
-    LinearLayout panel = newProfilePanel("Profile details: " + profileName(profile));
-    String secondary = profileSubtitle(profile);
-    if (!secondary.isEmpty()) profileCopy(panel, secondary);
-    String nickname = profile.optString("nickname", "");
-    boolean enabled = "enabled".equalsIgnoreCase(profile.optString("state"));
-    boolean disabled = "disabled".equalsIgnoreCase(profile.optString("state"));
-    profileFact(panel, "Card state",
-        enabled ? "Enabled" : disabled ? "Disabled" : "Unknown — refresh the card");
-    profileFact(panel, "ICCID", profile.optString("iccidMasked", "Not reported"));
-    profileFact(panel, "Nickname", nickname.isEmpty() ? "Not set" : nickname);
-    profileCopy(panel, "Card state does not confirm network registration.");
-    if (backend != null && inventory.optBoolean("writeQualified",false) && (enabled || disabled)) {
-      if (disabled && profile.optBoolean("canEnable",false)) profileAction(panel, "Activate", true, () -> {
-        if (!profileSelectionCurrent(index, profile)) return;
-        dismissProfilePanel();
-        prepare("switch", index, "");
-      });
-      if(profile.optBoolean("canRename",false)) profileAction(panel, "Rename", false, () -> showProfileRename(index, profile, row));
-      if (disabled && profile.optBoolean("canDelete",false)) profileAction(panel, "Delete eSIM", false, () -> {
-        if (!profileSelectionCurrent(index, profile)) return;
-        dismissProfilePanel();
-        prepare("delete", index, "");
-      });
-      else if(enabled && profile.optBoolean("canDisable",false)) profileAction(panel, "Disable eSIM", false, () -> {
-        if (!profileSelectionCurrent(index, profile)) return;
-        dismissProfilePanel();prepare("disable", index, "");
-      });
-    } else if (backend == null) profileCopy(panel, "Connect your card and refresh before editing this profile.");
-    else if (!inventory.optBoolean("writeQualified",false))
-      profileCopy(panel, "Management is unavailable for this card identity or local test scope. Reconnect and refresh.");
-    else profileCopy(panel, "The profile state is unknown. Refresh the card before making changes.");
-    profileAction(panel, "Done", false, this::dismissProfilePanel);
-    attachProfilePanel(panel, row, false);
-  }
-  private void showProfileRename(int index, JSONObject profile, View row) {
-    if (backend == null || !profileSelectionCurrent(index, profile) || row.getParent() != content)
-      return;
-    String original = profile.optString("nickname", "");
-    dismissProfilePanel();
-    profileSelection.open(inventory, backend, profile, index);
-    LinearLayout panel = newProfilePanel("Rename eSIM");
-    EditText name = input("Nickname", false);
-    name.setText(original);
-    name.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
-    profilePanelControls.add(name);
-    panel.addView(name, margin(16));
-    profileCopy(panel, "Keep it short. Leave blank to remove the nickname.");
-    profileAction(panel, "Review nickname", true, () -> {
-      if (!profileSelectionCurrent(index, profile)) {
-        dismissProfilePanel();
-        status("Selection changed", "Refresh and select the profile again.");
-        return;
-      }
-      String value = name.getText().toString();
-      if (value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 64
-          || value.matches("(?s).*[\\p{Cntrl}].*")) {
-        name.setError("Use a shorter nickname without control characters");
-        return;
-      }
-      dismissProfilePanel();
-      prepare("rename", index, value);
-    });
-    profileAction(panel, "Cancel", false, () -> {
-      dismissProfilePanel();
-      showProfile(index, profile, row);
-    });
-    attachProfilePanel(panel, row, false);
-  }
-  private void showInlineRenamePreview(int index, String nickname, JSONObject result,
-                                       IProfileService preparedBackend, String token) {
-    JSONArray profiles = inventory.optJSONArray("profiles");
-    JSONObject profile = profiles == null ? null : profiles.optJSONObject(index);
-    if (screen != 0 || profile == null || backend != preparedBackend || profilePanel != null) {
-      status("Review expired", "No nickname write submitted. Refresh and review again.");
-      return;
-    }
-    profileSelection.open(inventory, backend, profile, index);
-    LinearLayout panel = newProfilePanel("Save nickname?");
-    profileFact(panel, "Selected eSIM", result.optString("to", profileName(profile)));
-    profileCopy(panel, nickname.isEmpty()
-        ? "Remove this nickname (set it to blank)? No changes have been made."
-        : "Save nickname: " + mask(nickname) + "? No changes have been made.");
-    profileAction(panel, "Save nickname", true, () -> {
-      if (backend != preparedBackend || !profileSelectionCurrent(index, profile)) {
-        dismissProfilePanel();
-        status("Selection changed", "No action submitted. Refresh and review again.");
-        return;
-      }
-      dismissProfilePanel();
-      execute(preparedBackend, token, "rename");
-    });
-    profileAction(panel, "Cancel", false, () -> {
-      dismissProfilePanel();
-      status("Review cancelled", "No nickname write submitted.");
-    });
-    attachProfilePanel(panel, null, true);
+    JSONArray rows=inventory.optJSONArray("profiles");
+    if(destroyed||!resumed||OPERATIONS.running()||screen!=0||row.getParent()!=content||rows==null||rows.optJSONObject(index)!=profile)return;
+    selectDetail(index,profile);
   }
   private void addDivider() {
     View line = new View(this);line.setBackgroundColor(LINE);content.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
   }
   private void addScreen() {
+    add(text(cardLabel()+" · EID "+inventory.optString("eidMasked","Not checked"),12,MUTED,false),18);
     if (backend == null) {
       add(text("Connect your card to review and install. You can enter or scan your code first.", 14, MUTED, false), 18);
       add(action("Open connection settings", false, () -> navigate(2)), 10);
     }
     if (!draft.form) {
       add(text("How would you like to add your eSIM?", 16, MUTED, false), 22);
-      add(action("Scan a QR code  ›", false, () -> startActivityForResult(new Intent(this, QrScanActivity.class), QR)), 24);
+      add(action("Scan a QR code  ›", true, () -> startActivityForResult(new Intent(this, QrScanActivity.class), QR)), 24);
       add(action("Choose a QR image  ›", false, () -> {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("image/*");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i, IMAGE);
       }), 12);
@@ -970,7 +827,7 @@ public final class MainActivity extends Activity {
   }
   private void chooseCard() {
     final IProfileService service=backend;if(service==null||OPERATIONS.running())return;
-    clearCredentials();navigationSession++;dismissProfilePanel();
+    clearCredentials();navigationSession++;clearDetailSelection();
     final long choiceSession=navigationSession;
     run("Reading available cards",false,()->new JSONObject(service.prepareCardSelection()),result->{
       if(backend!=service||navigationSession!=choiceSession)return;
@@ -989,7 +846,7 @@ public final class MainActivity extends Activity {
           choices.dialog.dismiss();if(backend!=service||navigationSession!=choiceSession)return;
           run("Verifying selected card",false,()->new JSONObject(service.selectCard(token)),selected->{
             if(backend!=service||navigationSession!=choiceSession)return;
-            navigationSession++;dismissProfilePanel();inventory=new JSONObject();cardInfo=new JSONObject();compatibility=new JSONObject();notificationStatus="";notificationCleanupAvailable=false;
+            navigationSession++;clearDetailSelection();inventory=new JSONObject();cardInfo=new JSONObject();compatibility=new JSONObject();notificationStatus="";notificationCleanupAvailable=false;
             if(!selected.optBoolean("ok",false)){String explanation=SecureElementFailure.message(selected.optString("capabilityError",""));status("Card choice needs verification",explanation.isEmpty()?"The choice expired or the card changed. Choose a card again. No alternative was selected automatically.":explanation);render();return;}
             screen=0;status("Card selected","Reading this card and its recovery state…");render();checkRecovery();
           });
@@ -1093,10 +950,14 @@ public final class MainActivity extends Activity {
     }), 12);
     add(action("Setup help  ›", false, () -> {
       Sheet help = new Sheet("Connect your card");
-      help.copy("Connect this phone by USB, enable USB debugging and accept the computer authorization prompt. Choose Connect using computer, then run the matching bootstrap_companion.py with this phone's ADB serial.");
+      help.copy("Connect this phone by USB, enable USB debugging and accept the computer authorization prompt. Choose Connect using computer, then copy and run the displayed ADB command. No Python or additional download is required.");
       help.copy("After connection, open Compatibility check. A connected service alone does not prove card access: confirm the selected card channel and a fresh profile list. No card changes are made by the check.");
       help.copy("Reconnect after a phone restart, app update or service termination. Failed operations are never automatically repeated.");help.button("Done", false, help.dialog::dismiss);help.show();
     }), 12);
+    add(text("Appearance",19,TEXT,true),28);
+    add(action(darkTheme?"Theme: Dark":"Theme: Light",false,()->{getPreferences(0).edit().putBoolean("darkTheme",!darkTheme).apply();applyPalette();render();}),12);
+    add(text("Support",19,TEXT,true),28);
+    add(action("Operation records",false,()->{screen=5;navigationSession++;render();}),12);
     add(text("Card", 19, TEXT, true), 28);
     add(text("EID  " + mask(cardInfo.optString("eidMasked", inventory.optString("eidMasked", "Not checked")))), 10);
     add(text("Profiles  " + (inventory.optJSONArray("profiles") == null ? "Not checked" : inventory.optJSONArray("profiles").length())), 8);
@@ -1277,11 +1138,11 @@ public final class MainActivity extends Activity {
   private void updateStatusRegion() {
     if (statusTitle == null) return;
     for (View control : sheetControls) { control.setEnabled(!OPERATIONS.running());control.setAlpha(OPERATIONS.running() ? .45f : 1f); }
-    for (View control : taskControls) { control.setEnabled(!OPERATIONS.running());control.setAlpha(OPERATIONS.running() ? .45f : 1f); }
+    for (View control : taskControls) { control.setEnabled(!OPERATIONS.running()&&controlAvailability.getOrDefault(control,true));control.setAlpha(control.isEnabled()?1f:.45f); }
     boolean running = OPERATIONS.running();
     boolean pending = getPreferences(0).getBoolean("pending", false);
     if (busyProgress != null) busyProgress.setVisibility(running ? View.VISIBLE : View.GONE);
-    statusBox.setVisibility(screen != 0 && !running && !pending && notice.isEmpty() && (title.equals("Card connected") || title.equals("Check complete")) ? View.GONE : View.VISIBLE);
+    statusBox.setVisibility(UiStatusPolicy.visible(running,pending,!notice.isEmpty(),backend!=null,title)?View.VISIBLE:View.GONE);
     statusBox.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
     statusTitle.setText(running ? OPERATIONS.title() : !notice.isEmpty() ? pending ? "Needs verification" : "Update" : title);
     statusDetail.setText(running ? detail : !notice.isEmpty() ? notice : detail + (pending ? "\nSafety verification is required. Use Settings → Verify card and recovery before further changes." : ""));
@@ -1339,13 +1200,13 @@ public final class MainActivity extends Activity {
     b.setText(label);
     b.setTextSize(14);
     b.setAllCaps(false);
-    b.setTextColor(primary ? Color.WHITE : TEXT);
+    b.setTextColor(primary ? (darkTheme?0xff5c1b00:Color.WHITE) : TEXT);
     b.setMinHeight(dp(52));
     b.setPadding(dp(12), dp(10), dp(12), dp(10));
     GradientDrawable d = new GradientDrawable();
     d.setColor(primary ? ACCENT : BG);
     if (!primary) d.setStroke(dp(1), LINE);
-    d.setCornerRadius(dp(12));
+    d.setCornerRadius(dp(28));
     b.setBackground(d);
     return b;
   }
@@ -1365,7 +1226,7 @@ public final class MainActivity extends Activity {
     l.setPadding(dp(18), dp(18), dp(18), dp(18));
     GradientDrawable d = new GradientDrawable();
     d.setColor(SURFACE);
-    d.setCornerRadius(dp(12));
+    d.setCornerRadius(dp(28));
     l.setBackground(d);
     return l;
   }
@@ -1391,7 +1252,7 @@ public final class MainActivity extends Activity {
   @Override
   protected void onDestroy() {
     clearCredentials();
-    dismissProfilePanel();
+    clearDetailSelection();
     if (installResultDialog != null) installResultDialog.dismiss();
     if (activeSheet != null) activeSheet.dismiss();
     destroyed = true;

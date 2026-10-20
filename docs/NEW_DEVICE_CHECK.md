@@ -9,7 +9,7 @@ Use the APK and `bootstrap_companion.py` from the **same candidate delivery**. T
 
        adb -s SERIAL install -r 8bercue-0.18.1-rc11-33.apk
 
-   Replace SERIAL with the target serial. If Android reports a signing conflict, stop and preserve the existing app/data/safety history; do not uninstall or clear data as a shortcut.
+   Replace SERIAL with the target serial. If Android reports a signing conflict, stop and preserve the existing app/data/safety history; do not uninstall or clear data as a shortcut. Package signatures are shared across Android user profiles; any additional work/private-space registration must be included in an explicitly approved migration scope.
    Some ROMs reject `adb install` with `INSTALL_FAILED_USER_RESTRICTED` without showing a prompt. That is an installation policy, not a card-access result. You can copy the same APK to Downloads and open it in the normal system package installer. Preserve its hash/signature; do not remove an existing installation or disable security protections to hide a failure.
 3. Open 8bercue and choose **Connect using computer**. Keep **Waiting for computer** open, then run within two minutes:
 

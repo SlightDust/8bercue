@@ -63,3 +63,7 @@ The owner then authorized a public disposable-profile cycle on this phone. Witho
 ### Current APK on the Android 13 Telephony route
 
 APK 32 also passed the selected Android 13 Xiaomi's normal ADB connection, automatic Telephony fallback, explicit read-only recheck and original three-profile read. SMC nickname change/restore and disposable public BetterRoaming install/nickname change/restore/delete all passed exact independent postflight; povo remained enabled. No application code was changed. Installation notification 68 remains delivery_unknown while deletion notification 69 delivered, so notification closure remains partial. See [the APK-bound Telephony record](ANDROID13_PROFILE_CYCLE.md#same-apk-telephony-regression-0181-rc10--32); older successful notifications do not qualify this attempt.
+
+## Pixel multi-card candidate (0.18.1-rc11 / 33)
+
+The exact official APK `8039d70ed62af419a916066a568bc1915e8df31ef13d207a3ad630c87d824149` passed owner-approved migration, normal computer setup and explicit AIDL selection between two cards on Pixel 10 Pro XL, Android 17 / API 37. The removable card's public BetterRoaming install/rename/restore/delete cycle and new installation/deletion receipts passed, while its original Tigo and the built-in five profiles were preserved. Both cards also passed independent native/Java readback. Version 33 has not yet been physically regressed on Android 13. See [the exact qualification and remaining boundaries](PIXEL10_MULTI_CARD.md).

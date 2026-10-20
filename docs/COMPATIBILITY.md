@@ -77,3 +77,5 @@ The identical APK 32 subsequently passed normal computer connection, automatic T
 ## Version 33 explicit card choice
 
 The candidate adds an authenticated read-only choice when more than one eUICC is reachable. It never chooses by brand, slot order or removable status. The choice pins a complete card identity for the current Shell session and invalidates old operation previews; a missing or changed selected card stops access without fallback. Full identity/inventory checks, one-use write confirmations and unknown-result journals remain mandatory. See [selection boundaries](AUTOMATIC_COMPATIBILITY.md). Earlier APK 32 physical results do not qualify APK 33.
+
+The exact version-33 Pixel 10 Pro XL / Android 17 two-card qualification, approved signing migration and removable-card write/receipt results are recorded [separately](PIXEL10_MULTI_CARD.md). These do not qualify version 33 on Android 13 or resolve the older Xiaomi receipt.

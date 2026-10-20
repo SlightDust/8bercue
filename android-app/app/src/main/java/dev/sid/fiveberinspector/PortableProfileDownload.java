@@ -11,6 +11,7 @@ import java.util.*;
 public final class PortableProfileDownload {
     private static final long TTL=90_000L;
     private static Plan pending;
+    static synchronized void discardPreview(){pending=null;}
     private static final class Plan {
         final String token,reader,hash,identityHash,fingerprint,confirmation;
         final ActivationCode activation;

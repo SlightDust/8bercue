@@ -6,7 +6,7 @@
     "component": {
       "type": "application",
       "name": "8bercue",
-      "version": "0.18.1-rc10",
+      "version": "0.18.1-rc11",
       "bom-ref": "8bercue"
     }
   },

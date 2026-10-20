@@ -149,6 +149,19 @@ final class SystemHalAdapter {
    throw error;
   }
  }
+ static String describeReader(String reader){
+  if(!reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX))return "Secure Element reader "+reader;
+  int[] address=ReaderDescriptor.telephonyIndices(reader);
+  String fallback="Physical slot "+address[0]+", port "+address[1];
+  try {
+   Object binder=service("phone");if(binder==null)return fallback;
+   String name="com.android.internal.telephony.ITelephony";
+   Object[] slots=(Object[])Class.forName(name).getMethod("getUiccSlotsInfo",String.class).invoke(asInterface(name,binder),"com.android.shell");
+   if(slots==null||slots.length>8||address[0]>=slots.length||slots[address[0]]==null)return fallback;
+   Object slot=slots[address[0]];boolean removable=(Boolean)slot.getClass().getMethod("isRemovable").invoke(slot);
+   return (removable?"Removable eUICC":"Built-in eUICC")+" · "+fallback;
+  }catch(Exception unavailable){return fallback;}
+ }
  static java.util.List<String> telephonyReaders()throws Exception {
   requireShell();
   java.util.List<String> readers=new java.util.ArrayList<>();

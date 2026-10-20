@@ -14,6 +14,7 @@ public final class ProfileUserService extends IProfileService.Stub {
         this.transport=transport;
         try {ServiceCaller.pinInstallation();} catch(Exception invalid){throw new SecurityException("Invalid service installation",invalid);}
     }
+    private CardChoicePlan pendingCardChoice;
     private String displayedFingerprint;
     private String displayedCard;
     private String displayedLifecycleFingerprint;
@@ -33,6 +34,36 @@ public final class ProfileUserService extends IProfileService.Stub {
             " / apkClasspath="+apkPath+" / read + scoped switch preview";
     }
 
+    private void invalidatePreviews(){
+        displayedFingerprint=null;displayedCard=null;displayedLifecycleFingerprint=null;
+        PortableProfileLifecycle.discardPreview();PortableProfileDownload.discardPreview();PhoneNotificationDelivery.discardCleanupPreview();
+    }
+    @Override public synchronized String prepareCardSelection(){
+        try(ServiceCaller.ShellCall caller=ServiceCaller.asShell()){
+            CardTransactionLock.acquire();try{
+                // Read-only selection also permits observing a card with an unresolved journal.
+                // It never clears that journal or permits a mutation while recovery is required.
+                pendingCardChoice=null;invalidatePreviews();
+                pendingCardChoice=new CardChoicePlan(FiveberReaderSelector.discoverChoices(),android.os.SystemClock.elapsedRealtime());
+                org.json.JSONArray choices=new org.json.JSONArray();
+                for(CardChoicePlan.Choice choice:pendingCardChoice.choices)choices.put(new JSONObject()
+                    .put("token",choice.token).put("reader",choice.target.reader)
+                    .put("description",SystemHalAdapter.describeReader(choice.target.reader)).put("eidMasked",choice.target.eidMasked));
+                return new JSONObject().put("ok",true).put("readOnly",true).put("validSeconds",90).put("choices",choices).toString();
+            }finally{CardTransactionLock.release();}
+        }catch(Throwable failure){pendingCardChoice=null;return safeOperationError("card-choices",failure);}
+    }
+    @Override public synchronized String selectCard(String opaqueChoice){
+        try(ServiceCaller.ShellCall caller=ServiceCaller.asShell()){
+            CardTransactionLock.acquire();try{
+                CardChoicePlan plan=pendingCardChoice;pendingCardChoice=null;invalidatePreviews();
+                if(plan==null)throw new SecurityException("No pending card choice");
+                FiveberReaderSelector.Target expected=plan.consume(opaqueChoice,android.os.SystemClock.elapsedRealtime());
+                FiveberReaderSelector.Target selected=FiveberReaderSelector.selectExplicitly(expected);
+                return new JSONObject().put("ok",true).put("readOnly",true).put("reader",selected.reader).put("eidMasked",selected.eidMasked).toString();
+            }finally{CardTransactionLock.release();}
+        }catch(Throwable failure){return safeOperationError("card-selection",failure);}
+    }
     @Override
     public synchronized String listProfiles() throws RemoteException {
         Log.i("EightberShell", "listProfiles entered shellUid="+(Process.myUid()==2000));

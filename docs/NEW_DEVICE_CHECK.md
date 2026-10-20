@@ -7,7 +7,7 @@ Use the APK and `bootstrap_companion.py` from the **same candidate delivery**. T
 1. Enable USB debugging on the target phone, connect it to a trusted computer and accept that computer's authorization prompt. Run `adb devices -l`; identify the target's exact serial and require state `device`. This bootstrap currently supports the owner user (user 0).
 2. Install the candidate on that target, for example:
 
-       adb -s SERIAL install -r 8bercue-0.18.1-rc10-32.apk
+       adb -s SERIAL install -r 8bercue-0.18.1-rc11-33.apk
 
    Replace SERIAL with the target serial. If Android reports a signing conflict, stop and preserve the existing app/data/safety history; do not uninstall or clear data as a shortcut.
    Some ROMs reject `adb install` with `INSTALL_FAILED_USER_RESTRICTED` without showing a prompt. That is an installation policy, not a card-access result. You can copy the same APK to Downloads and open it in the normal system package installer. Preserve its hash/signature; do not remove an existing installation or disable security protections to hide a failure.
@@ -16,7 +16,8 @@ Use the APK and `bootstrap_companion.py` from the **same candidate delivery**. T
        python3 bootstrap_companion.py --serial SERIAL
 
    If ADB is not in PATH, append `--adb /absolute/path/to/adb`. The script uses the selected serial for every device command. It neither installs the app nor changes cards or communication settings. USB is the default; it does not enable wireless debugging.
-4. Keep the app open until the profile read finishes. A successful Binder handoff only proves the app-to-Shell connection; it does not prove card access.
+4. If several readable cards are found, choose **Choose card** and verify the physical slot/port and masked EID suffix before selecting the intended eUICC. The built-in card and removable card are distinct assets. A choice lasts only for the current Shell service session; a missing or changed selected card stops access instead of selecting an alternative.
+5. Keep the app open until the profile read finishes. A successful Binder handoff only proves the app-to-Shell connection; it does not prove card access.
 
 The computer starts a local authenticated Shell service. It is not a permanent privilege grant. Reconnect after reboot, APK update, or app/companion process termination. A normal background/foreground return can reuse an existing live connection. No failed card operation is automatically replayed.
 

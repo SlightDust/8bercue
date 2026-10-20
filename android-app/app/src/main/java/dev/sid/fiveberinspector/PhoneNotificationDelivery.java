@@ -13,6 +13,7 @@ import java.util.*;
 public final class PhoneNotificationDelivery {
   private static final File DIRECTORY=new File("/data/local/tmp/fiveber-lpac-lab/notifications");
   private static CleanupPlan pendingCleanup;
+  static synchronized void discardCleanupPreview(){pendingCleanup=null;}
   private static final class CleanupPlan {
     final String token,id,reader,card,inventory;final long created=SystemClock.elapsedRealtime();
     CleanupPlan(String id,String reader,String card,String inventory){token=OperationTokens.create();this.id=id;this.reader=reader;this.card=card;this.inventory=inventory;}

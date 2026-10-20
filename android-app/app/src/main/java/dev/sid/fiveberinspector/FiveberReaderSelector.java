@@ -22,8 +22,9 @@ public final class FiveberReaderSelector {
         public final String reader;
         public final String sha256Prefix;
         public final String identityHash;
-        private Target(String reader,String prefix) {
-            this.reader=reader;this.identityHash=prefix.toLowerCase(Locale.ROOT);this.sha256Prefix=prefix.substring(0,16);
+        public final String eidMasked;
+        private Target(String reader,String prefix,String masked) {
+            this.reader=reader;this.identityHash=prefix.toLowerCase(Locale.ROOT);this.sha256Prefix=prefix.substring(0,16);this.eidMasked=masked;
         }
     }
 
@@ -90,9 +91,9 @@ public final class FiveberReaderSelector {
                 channel=hal.openLogicalChannel(fromHex(ISDR_AID),(byte)0);
                 if(channel<1||channel>3)throw new SecureElementFailure(SecureElementFailure.Reason.APPLET_UNAVAILABLE);
                 phase=CompatibilityReport.Stage.EID_READ;
-                String digest=digestPrefix(readEid(hal,channel));
+                byte[] eid=readEid(hal,channel);String digest=digestPrefix(eid);
                 if(!ReaderAdmission.accepts(digest))throw new SecureElementFailure(SecureElementFailure.Reason.INVALID_EID_RESPONSE);
-                found=new Target(reader,digest);
+                String digits=upperHex(eid);found=new Target(reader,digest,"…"+digits.substring(digits.length()-4));
             }
         }catch(Exception error) {
             Throwable cause=unwrap(error);SecureElementFailure typed=SecureElementFailure.find(error);
@@ -118,7 +119,41 @@ public final class FiveberReaderSelector {
     public static Target discover() throws Exception {return discoverInternal();}
     public static Target discoverKnownCardReadOnly() throws Exception {return discoverInternal();}
 
+    private static volatile Target explicitSelection;
+    private static CompatibilityReport.Backend backendOf(String reader){
+        return reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX)?CompatibilityReport.Backend.TELEPHONY:
+            reader.startsWith(ReaderDescriptor.HIDL_PREFIX)?CompatibilityReport.Backend.HAL_HIDL:
+            reader.startsWith(ReaderDescriptor.OMAPI_PREFIX)?CompatibilityReport.Backend.OMAPI:CompatibilityReport.Backend.HAL_AIDL;
+    }
+    static void clearExplicitSelection(){explicitSelection=null;}
+    static Target selectExplicitly(Target expected)throws Exception {
+        if(Process.myUid()!=Process.SHELL_UID)throw new SecurityException("Shell required");
+        Target observed=verifySelected(expected);explicitSelection=observed;return observed;
+    }
+    private static Target verifySelected(Target expected)throws Exception {
+        CompatibilityReport report=new CompatibilityReport();REPORT.set(report);
+        CompatibilityReport.Backend backend=backendOf(expected.reader);
+        try {
+            if(!SystemHalAdapter.readers(backend).contains(expected.reader))throw new SecureElementFailure(SecureElementFailure.Reason.SELECTED_CARD_CHANGED);
+            Target observed=inspectOne(expected.reader,backend,report);
+            if(!observed.identityHash.equals(expected.identityHash))throw new SecureElementFailure(SecureElementFailure.Reason.SELECTED_CARD_CHANGED);
+            report.selected(backend,observed.reader);return observed;
+        }catch(Exception error){
+            SecureElementFailure failure=typed(error);
+            report.record(backend,expected.reader,CompatibilityReport.Stage.SELECTION,failure.reason);
+            if(failure.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED&&CardTransactionLock.isActive())CardTransactionLock.quarantine();
+            throw failure; // Never fall back from a lost or changed explicit selection.
+        }
+    }
     private static Target discoverInternal() throws Exception {
+        if(Process.myUid()!=Process.SHELL_UID)throw new SecurityException("Requires authorized ADB Shell UID2000");
+        Target selected=explicitSelection;if(selected!=null)return verifySelected(selected);
+        List<Target> matches=discoverChoices();CompatibilityReport report=REPORT.get();
+        if(matches.size()!=1){report.record(backendOf(matches.get(0).reader),"",CompatibilityReport.Stage.SELECTION,SecureElementFailure.Reason.AMBIGUOUS_EUICC);throw new SecureElementFailure(SecureElementFailure.Reason.AMBIGUOUS_EUICC);}
+        Target target=matches.get(0);report.selected(backendOf(target.reader),target.reader);return target;
+    }
+    /** Read-only choices; does not alter the active selection or admit a mutation. */
+    static List<Target> discoverChoices()throws Exception {
         if(Process.myUid()!=Process.SHELL_UID)throw new SecurityException("Requires authorized ADB Shell UID2000");
         CompatibilityReport report=new CompatibilityReport();REPORT.set(report);
         SecureElementFailure best=null;
@@ -139,11 +174,8 @@ public final class FiveberReaderSelector {
                 if(failure.reason==SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED){if(CardTransactionLock.isActive())CardTransactionLock.quarantine();throw failure;}
                 best=prefer(best,failure);
             }
-            if(matches.size()>1){
-                report.record(backend,"",CompatibilityReport.Stage.SELECTION,SecureElementFailure.Reason.AMBIGUOUS_EUICC);
-                throw new SecureElementFailure(SecureElementFailure.Reason.AMBIGUOUS_EUICC);
-            }
-            if(matches.size()==1){Target target=matches.get(0);report.selected(backend,target.reader);return target;}
+            if(matches.size()>16)throw new SecureElementFailure(SecureElementFailure.Reason.INVALID_READER_INVENTORY);
+            if(!matches.isEmpty())return java.util.Collections.unmodifiableList(matches);
         }
         throw best==null?new SecureElementFailure(SecureElementFailure.Reason.NO_READABLE_EUICC):best;
     }

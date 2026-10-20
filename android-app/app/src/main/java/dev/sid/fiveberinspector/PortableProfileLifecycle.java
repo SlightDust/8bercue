@@ -6,6 +6,7 @@ import java.util.*;
 /** Single-use inventory-bound transactions; failures reconcile without blind retries. */
 public final class PortableProfileLifecycle {
  private static Plan pending;
+    static synchronized void discardPreview(){pending=null;}
  private static final class Plan {
   String token,reader,hash,identityHash,digest,id,nickname;long created;ProfileLifecycleGuard.Operation op;
  }

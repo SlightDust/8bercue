@@ -40,6 +40,10 @@ final class CompanionProfileBackend extends IProfileService.Stub {
                     .optString("status", "Companion status unavailable");
         } catch (Exception e) { return "Companion disconnected"; }
     }
+    @Override public String prepareCardSelection() { return result("prepareCardSelection"); }
+    @Override public String selectCard(String token) {
+        return result("selectCard",null,null,token,null,null,false);
+    }
     @Override public String listProfiles() { return result("listProfiles"); }
     @Override public String getCardInfo() { return result("getCardInfo"); }
     @Override public String getOperationStatus() { return result("getOperationStatus"); }

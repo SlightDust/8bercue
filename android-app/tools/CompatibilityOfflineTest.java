@@ -335,6 +335,57 @@ public final class CompatibilityOfflineTest {
   SystemHalAdapter.transports.clear();SystemHalAdapter.fallback.clear();SystemHalAdapter.failures.clear();SystemHalAdapter.order.clear();
  }
 
+
+ static void expectReason(Throwing action,SecureElementFailure.Reason reason)throws Exception {
+  try{action.run();throw new AssertionError("Expected "+reason);}catch(SecureElementFailure failure){check(failure.reason==reason);}
+ }
+ static void explicitCardSelectionTests()throws Exception {
+  FiveberReaderSelector.clearExplicitSelection();SystemHalAdapter.transports.clear();SystemHalAdapter.fallback.clear();SystemHalAdapter.failures.clear();SystemHalAdapter.order.clear();
+  try {
+   Card builtin=new Card(10),removable=new Card(20);SystemHalAdapter.fallback.put("telephony.0.1",builtin);SystemHalAdapter.fallback.put("telephony.1.0",removable);
+   expectReason(()->FiveberReaderSelector.discover(),SecureElementFailure.Reason.AMBIGUOUS_EUICC);
+   List<FiveberReaderSelector.Target> targets=FiveberReaderSelector.discoverChoices();check(targets.size()==2);
+   expectReason(()->FiveberReaderSelector.discover(),SecureElementFailure.Reason.AMBIGUOUS_EUICC); // Listing is not selecting.
+   FiveberReaderSelector.Target target=targets.get(1);check(target.reader.equals("telephony.1.0"));
+   check(target.eidMasked.matches("…[0-9A-F]{4}")&&!target.eidMasked.contains(target.identityHash));
+   CardChoicePlan plan=new CardChoicePlan(targets,100);String token=plan.choices.get(1).token;
+   check(token.matches("[a-f0-9]{48}")&&!token.equals(plan.choices.get(0).token));
+   check(plan.consume(token,100+CardChoicePlan.TTL)==target);rejects(()->plan.consume(token,101));
+   CardChoicePlan expired=new CardChoicePlan(targets,100);rejects(()->expired.consume(expired.choices.get(1).token,101+CardChoicePlan.TTL));
+   rejects(()->expired.consume(expired.choices.get(1).token,101));
+   CardChoicePlan rollback=new CardChoicePlan(targets,100);rejects(()->rollback.consume(rollback.choices.get(1).token,99));
+   CardChoicePlan malformed=new CardChoicePlan(targets,100);rejects(()->malformed.consume(null,101));rejects(()->malformed.consume(malformed.choices.get(1).token,101));
+   CardChoicePlan unoffered=new CardChoicePlan(targets,100);rejects(()->unoffered.consume("f".repeat(48),101));rejects(()->unoffered.consume(unoffered.choices.get(1).token,101));
+   rejects(()->new CardChoicePlan(List.of(target,target),100));rejects(()->new CardChoicePlan(Collections.emptyList(),100));
+   rejects(()->new CardChoicePlan(Collections.nCopies(17,target),100));rejects(()->new CardChoicePlan(targets,-1));
+   int builtinFrames=builtin.frames;SystemHalAdapter.order.clear();
+   check(FiveberReaderSelector.selectExplicitly(target).identityHash.equals(target.identityHash));
+   check(FiveberReaderSelector.discover().reader.equals("telephony.1.0")&&builtin.frames==builtinFrames);
+   check(SystemHalAdapter.order.equals(List.of(CompatibilityReport.Backend.TELEPHONY,CompatibilityReport.Backend.TELEPHONY)));
+   check(FiveberReaderSelector.compatibilityReport().selectedBackend().equals("TELEPHONY"));
+   // Same route and same visible EID suffix, different complete identity: no fallback.
+   Card replacement=new Card(21);SystemHalAdapter.fallback.put("telephony.1.0",replacement);SystemHalAdapter.order.clear();
+   expectReason(()->FiveberReaderSelector.discover(),SecureElementFailure.Reason.SELECTED_CARD_CHANGED);
+   check(builtin.frames==builtinFrames&&replacement.closed==1&&SystemHalAdapter.order.equals(List.of(CompatibilityReport.Backend.TELEPHONY)));
+   check(FiveberReaderSelector.compatibilityReport().selectedBackend().isEmpty());
+   // A stale choice must not replace the previously pinned target with a swapped card.
+   expectReason(()->FiveberReaderSelector.selectExplicitly(target),SecureElementFailure.Reason.SELECTED_CARD_CHANGED);
+   SystemHalAdapter.fallback.remove("telephony.1.0");SystemHalAdapter.transports.put("SIM1",new Card(30));
+   expectReason(()->FiveberReaderSelector.discover(),SecureElementFailure.Reason.SELECTED_CARD_CHANGED);check(builtin.frames==builtinFrames);
+   SystemHalAdapter.fallback.put("telephony.1.0",removable);check(FiveberReaderSelector.discover().identityHash.equals(target.identityHash));
+   removable.failClose=true;CardTransactionLock.active=true;
+   expectReason(()->FiveberReaderSelector.discover(),SecureElementFailure.Reason.CHANNEL_CLEANUP_FAILED);check(CardTransactionLock.quarantined);
+   removable.failClose=false;CardTransactionLock.active=false;CardTransactionLock.quarantined=false;
+   android.os.Process.uid=10001;rejects(()->FiveberReaderSelector.discoverChoices());rejects(()->FiveberReaderSelector.selectExplicitly(target));rejects(()->FiveberReaderSelector.discover());android.os.Process.uid=2000;
+   // A service restart cannot silently persist the previous choice.
+   FiveberReaderSelector.clearExplicitSelection();SystemHalAdapter.transports.clear();
+   expectReason(()->FiveberReaderSelector.discover(),SecureElementFailure.Reason.AMBIGUOUS_EUICC);
+  } finally {
+   android.os.Process.uid=2000;FiveberReaderSelector.clearExplicitSelection();CardTransactionLock.active=false;CardTransactionLock.quarantined=false;
+   SystemHalAdapter.transports.clear();SystemHalAdapter.fallback.clear();SystemHalAdapter.failures.clear();SystemHalAdapter.order.clear();
+  }
+ }
+
  public static void main(String[] args)throws Exception {
   compatibilityDetectionTests();
   telephonyTests();renameTests();protocolTests();scopeTests();singleChannelNotificationTests();deletionNotificationTests();
@@ -390,6 +441,7 @@ public final class CompatibilityOfflineTest {
   rejects(()->ProtectedProfilePolicy.validate(ProfileLifecycleGuard.Operation.ENABLE,rows,rows.get(1).id,rows.get(0).id));
   check(!ProfileLifecycleGuard.selectionFingerprint(rows).equals(ProfileLifecycleGuard.selectionFingerprint(List.of(rows.get(1),rows.get(0)))));
   check(SecureElementFailure.message("ACCESS_DENIED").contains("ROM"));check(SecureElementFailure.message("untrusted vendor text").isEmpty());
+  explicitCardSelectionTests();
   System.out.println("PASS compatibility and safety regressions: "+assertions+" assertions (synthetic; no live success claim)");
  }
 }

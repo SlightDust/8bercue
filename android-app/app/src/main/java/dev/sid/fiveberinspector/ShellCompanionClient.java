@@ -80,6 +80,7 @@ public final class ShellCompanionClient {
         switch (method) {
             case "getStatus": case "listProfiles": case "getCardInfo":
             case "getOperationStatus": case "reconcileOperation":
+            case "prepareCardSelection": case "selectCard":
             case "prepareSwitch": case "executeSwitch": case "prepareRename":
             case "prepareDelete": case "prepareDisable": case "executeOperation":
             case "prepareDownload": case "executeDownload":

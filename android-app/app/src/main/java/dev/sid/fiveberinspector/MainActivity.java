@@ -658,8 +658,9 @@ public final class MainActivity extends Activity {
     add(heading, 22);
     if (profiles == null) {
       add(text("Your eSIMs will appear here", 20, TEXT, true), 28);
-      add(text("Connect your phone using a computer to check its available card channels.", 15, MUTED, false), 10);
-      add(action("Connect using computer", true, this::beginDirectBootstrap), 20);
+      add(text(backend!=null?"Check compatibility or choose the card you intend to manage.":"Connect your phone using a computer to check its available card channels.", 15, MUTED, false), 10);
+      if(backend!=null)add(action("Choose card",true,this::chooseCard),20);
+      else add(action("Connect using computer", true, this::beginDirectBootstrap), 20);
       return;
     }
     for (int i = 0; i < profiles.length(); i++) {
@@ -967,6 +968,37 @@ public final class MainActivity extends Activity {
       public void afterTextChanged(android.text.Editable value) {}
     });
   }
+  private void chooseCard() {
+    final IProfileService service=backend;if(service==null||OPERATIONS.running())return;
+    clearCredentials();navigationSession++;dismissProfilePanel();
+    final long choiceSession=navigationSession;
+    run("Reading available cards",false,()->new JSONObject(service.prepareCardSelection()),result->{
+      if(backend!=service||navigationSession!=choiceSession)return;
+      if(!result.optBoolean("ok",false)){
+        String explanation=SecureElementFailure.message(result.optString("capabilityError",""));
+        status("Card choice unavailable",explanation.isEmpty()?"Reconnect and check recovery. No card was changed.":explanation);render();return;
+      }
+      inventory=new JSONObject();cardInfo=new JSONObject();
+      Sheet choices=new Sheet("Choose a card");
+      choices.copy("Choose the eUICC you intend to manage. This checks card identity only; no profile changes happen. Changing cards discards old operation previews.");
+      JSONArray rows=result.optJSONArray("choices");
+      if(rows!=null)for(int i=0;i<rows.length();i++){
+        JSONObject choice=rows.optJSONObject(i);if(choice==null)continue;
+        String token=choice.optString("token","");
+        choices.button(choice.optString("description","Card")+" · EID "+choice.optString("eidMasked","")+" · "+choice.optString("reader",""),false,()->{
+          choices.dialog.dismiss();if(backend!=service||navigationSession!=choiceSession)return;
+          run("Verifying selected card",false,()->new JSONObject(service.selectCard(token)),selected->{
+            if(backend!=service||navigationSession!=choiceSession)return;
+            navigationSession++;dismissProfilePanel();inventory=new JSONObject();cardInfo=new JSONObject();compatibility=new JSONObject();notificationStatus="";notificationCleanupAvailable=false;
+            if(!selected.optBoolean("ok",false)){String explanation=SecureElementFailure.message(selected.optString("capabilityError",""));status("Card choice needs verification",explanation.isEmpty()?"The choice expired or the card changed. Choose a card again. No alternative was selected automatically.":explanation);render();return;}
+            screen=0;status("Card selected","Reading this card and its recovery state…");render();checkRecovery();
+          });
+        });
+      }
+      choices.copy("The selection lasts for this Shell service session. A missing or changed selected card stops access; another card is never chosen as a fallback.");
+      choices.button("Cancel",false,()->{choices.dialog.dismiss();refresh();});choices.show();
+    });
+  }
   private void showCompatibility() {
     Sheet check=new Sheet("Compatibility check");
     if(compatibility.length()==0)check.copy("Connect the Shell service, then refresh to check this card. No card has been verified in this connection.");
@@ -977,7 +1009,8 @@ public final class MainActivity extends Activity {
           ? "Profile reading verified. This read-only check does not test downloads, switching or deletion."
           : "Profile reading has not been verified. No compatibility check changes a profile.");
     }
-    check.copy("Order: Secure Element HAL (AIDL, then HIDL), Telephony, then OMAPI. Multiple readable cards or unconfirmed channel cleanup stop selection. No brand or Android-version list selects a card.");
+    check.copy("Order: Secure Element HAL (AIDL, then HIDL), Telephony, then OMAPI. Multiple readable cards require an explicit choice. Unconfirmed channel cleanup stops access. No brand or Android-version list selects a card.");
+    if(backend!=null)check.button("Choose card",false,()->{check.dialog.dismiss();chooseCard();});
     check.button("Run read-only check",false,()->{check.dialog.dismiss();if(backend!=null||fallback)refresh();else status("Connect first","Use Connect using computer, then run the compatibility check.");});
     check.button("Done",false,check.dialog::dismiss);check.show();
   }
@@ -985,6 +1018,7 @@ public final class MainActivity extends Activity {
     add(text("Connection", 19, TEXT, true), 24);
     add(text("Card connection: "+compatibility.optString("route","Not checked in this connection"),14,MUTED,false),8);
     add(action("Compatibility check",false,this::showCompatibility),12);
+    if(backend!=null)add(action("Choose card",false,this::chooseCard),12);
     add(text(directManagement && backend != null ? "Computer connection active"
           : companionManagement ? "Local companion connected"
           : binderReadOnlyInventory ? "Read-only diagnostic connection"

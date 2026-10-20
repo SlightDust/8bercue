@@ -17,5 +17,7 @@ interface IProfileService {
     String getCardInfo() = 13;
     String prepareNotificationCleanup() = 14;
     String executeNotificationCleanup(String opaqueToken) = 15;
+    String prepareCardSelection() = 16;
+    String selectCard(String opaqueChoice) = 17;
     void destroy() = 16777114;
 }

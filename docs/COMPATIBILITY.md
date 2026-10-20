@@ -2,7 +2,7 @@
 
 Installing the APK and accessing an eUICC are separate requirements. Minimum SDK is 28 (Android 9), with ARM64 native components built for API 28. Compile/target SDK remains 36.
 
-The published v0.18.0-beta.1 APK (0.18.0-rc1 / 22) rejects management below API 36. The unpublished 0.18.1-rc10 / 32 candidate checks actual capabilities instead and includes an **experimental Shell Telephony fallback with scoped management protocols**. This is not general Android 13 qualification.
+The published v0.18.0-beta.1 APK (0.18.0-rc1 / 22) rejects management below API 36. The unpublished 0.18.1-rc11 / 33 candidate checks actual capabilities instead and includes an **experimental Shell Telephony fallback with scoped management protocols**. This is not general Android 13 qualification.
 
 ## Transports
 
@@ -73,3 +73,7 @@ One adapter can serve multiple ROMs exposing the same interface and access behav
 ## Version 32 Android 13 follow-up
 
 The identical APK 32 subsequently passed normal computer connection, automatic Telephony selection, original three-profile reads, inactive SMC rename/restore, and public BetterRoaming install/test rename/restore/delete. All six card transactions verified and the exact original inventory returned, with povo enabled throughout. Installation notification 68 remains delivery_unknown; deletion notification 69 delivered. The overall notification loop is therefore partial, not qualified by the older version-29 success or the Android-16 AIDL success. No application code or APK changed. See the [current Telephony regression and unresolved receipt](ANDROID13_PROFILE_CYCLE.md#same-apk-telephony-regression-0181-rc10--32).
+
+## Version 33 explicit card choice
+
+The candidate adds an authenticated read-only choice when more than one eUICC is reachable. It never chooses by brand, slot order or removable status. The choice pins a complete card identity for the current Shell session and invalidates old operation previews; a missing or changed selected card stops access without fallback. Full identity/inventory checks, one-use write confirmations and unknown-result journals remain mandatory. See [selection boundaries](AUTOMATIC_COMPATIBILITY.md). Earlier APK 32 physical results do not qualify APK 33.

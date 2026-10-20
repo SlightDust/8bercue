@@ -1,17 +1,19 @@
 # Automatic card compatibility checks
 
-The unpublished 0.18.1-rc10 / 32 candidate selects a connection from actual read-only observations. The release has no phone-brand, model or Android 16 admission list. Installation still requires Android 9 / API 28 and ARM64 because of the packaged Java/native implementation. That minimum does not promise a usable card channel.
+The unpublished 0.18.1-rc11 / 33 candidate selects a connection from actual read-only observations. The release has no phone-brand, model or Android 16 admission list. Installation still requires Android 9 / API 28 and ARM64 because of the packaged Java/native implementation. That minimum does not promise a usable card channel.
 
 ## Selection and evidence
 
 1. Enumerate registered Secure Element **AIDL HAL** instances. Load interface classes only from the trusted system SecureElement APK.
 2. Check **HIDL HAL** instances declared in the platform-merged VINTF manifests. This does not depend on optional Java HIDL service-manager classes or guessed SIM1/SIM2 names. A declaration is not evidence that Shell can reach a service.
-3. If neither HAL backend produced one verified card, check **Telephony**: require the implemented physical-slot/port Binder methods, enumerate present active slots/ports, and use the real Shell identity. The experimental fixed-AID case workaround remains necessary on the tested Xiaomi ROM.
+3. If neither HAL backend produced any verified card, check **Telephony**: require the implemented physical-slot/port Binder methods, enumerate present active slots/ports, and use the real Shell identity. The experimental fixed-AID case workaround remains necessary on the tested Xiaomi ROM.
 4. If still unconnected, check **OMAPI**, retaining its normal card/app access rules.
 
 For each reader, check service lookup, card presence, opening the fixed ISD-R management applet, complete GetEID response with bounded continuation, and closing only the owned channel. No profile mutation, download, notification HTTP, HAL initialization/reset or global communication-setting change is part of discovery. Interface methods including channel closure are checked before a HAL channel is opened.
 
-Two verified readers in one backend block automatic selection. Invalid, duplicate or over-bound reader inventories also stop fallback; they are not mislabeled as permission denial. An uncertain/failed channel close stops all fallback; an active production transaction coordinator is quarantined. Discovery never selects a reader just because it is first, removable, called SIM1, or on a known phone. Every later operation independently rechecks full card identity and inventory.
+Two verified readers in one backend block automatic selection. Invalid, duplicate or over-bound reader inventories also stop fallback; they are not mislabeled as permission denial. An uncertain/failed channel close stops all fallback; an active production transaction coordinator is quarantined. Discovery never selects a reader just because it is first, removable, called SIM1, or on a known phone. **Choose card** lists the verified readers from the first successful backend with a masked EID suffix and, where the framework exposes it, physical slot/port and removable status. The user must explicitly choose; this is not an automatic preference for removable cards. Every later operation independently rechecks full card identity and inventory.
+
+An explicit selection is bound to the complete verified EID hash and reader in the Shell service session. A short-lived, one-use opaque choice is consumed only after authenticating the caller and acquiring the shared card lock; the service re-reads the identity and confirms channel closure before pinning it. Missing/changed selected cards stop access, without probing an alternative backend or card. The user may deliberately choose again. Service restart removes the in-memory choice. Selecting/preparing a card discards stale lifecycle/download/receipt-cleanup previews. It does not clear operation or notification journals, replay an unknown operation, or authorize a write. Read-only selection remains available to observe recovery state; unresolved transactions still block mutations.
 
 HIDL transport in this build implements read-only GetEID/GetProfilesInfo/GetEuiccInfo2 commands. HIDL management writes are not implemented and are refused by operation admission. This is a transport implementation boundary, not a device-name gate. The AIDL and Telephony management protocols retain their existing scoped-operation restrictions.
 
@@ -25,7 +27,7 @@ The authenticated inventory response includes a schema-1 `compatibility` object:
 
 ## Verification boundaries
 
-Synthetic regressions cover backend order and early success, missing classes and denied access, preserving multiple failure reasons, no-card versus invalid response, ambiguity, no fallback after cleanup failure, coordinator quarantine, VINTF declaration formats versus compatibility matrices, XML entity rejection, fixed read-only HIDL commands and failed/lost callback handling. They also exercise admission across API 28–37 with no brand predicate. Physical-device results must be bound to the exact installed APK; the successful version-29 management cycle does not qualify version 31 writes.
+Synthetic regressions cover backend order and early success, missing classes and denied access, preserving multiple failure reasons, no-card versus invalid response, ambiguity, no fallback after cleanup failure, coordinator quarantine, VINTF declaration formats versus compatibility matrices, XML entity rejection, fixed read-only HIDL commands and failed/lost callback handling. They also exercise admission across API 28–37 with no brand predicate. Version 33 adds explicit-choice tests for ambiguity remaining blocked until selection, token expiry/reuse/unoffered choices, full identity changes despite equal masked suffixes, disappearance without fallback, cleanup quarantine, Shell-only access and loss of the pin on service restart. Synthetic checks do not qualify a physical device. Physical-device results must be bound to the exact installed APK; the successful version-29 management cycle does not qualify version 31 writes.
 
 ## Interface references
 

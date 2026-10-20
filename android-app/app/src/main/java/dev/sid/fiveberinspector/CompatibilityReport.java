@@ -58,6 +58,7 @@ final class CompatibilityReport {
    case APPLET_UNAVAILABLE -> "management applet unavailable or channel could not be opened";
    case INVALID_EID_RESPONSE -> "response did not verify a complete eUICC identity";
    case SERVICE_UNREACHABLE -> "service could not be reached; it may be absent or lookup may be blocked";
+   case SELECTED_CARD_CHANGED -> "the selected card identity or reader changed; no automatic fallback";
    case AMBIGUOUS_EUICC -> "multiple readable eUICCs; automatic selection stopped";
    case CHANNEL_CLEANUP_FAILED -> "cleanup could not be verified; all fallback stopped";
    default -> "check could not complete";

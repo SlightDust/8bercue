@@ -104,6 +104,12 @@ final class CompanionProfileRpc {
             case "reconcileOperation":
                 result = parse(backend.reconcileOperation());
                 break;
+            case "prepareCardSelection":
+                result = parse(backend.prepareCardSelection());
+                break;
+            case "selectCard":
+                result = parse(backend.selectCard(token(request)));
+                break;
             case "prepareSwitch":
                 result = parse(backend.prepareSwitch(index(request)));
                 break;

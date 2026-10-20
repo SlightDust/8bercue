@@ -4,7 +4,7 @@ package dev.sid.fiveberinspector;
 final class SecureElementFailure extends SecurityException {
     enum Reason {
         NO_SERVICE, SYSTEM_INTERFACE_UNAVAILABLE, ACCESS_DENIED, NO_READABLE_EUICC,
-        AMBIGUOUS_EUICC, CHANNEL_CLEANUP_FAILED, READ_ONLY_TRANSPORT,
+        AMBIGUOUS_EUICC, SELECTED_CARD_CHANGED, CHANNEL_CLEANUP_FAILED, READ_ONLY_TRANSPORT,
         NO_CARD, APPLET_UNAVAILABLE, INVALID_EID_RESPONSE, SERVICE_UNREACHABLE, INVALID_READER_INVENTORY
     }
     final Reason reason;
@@ -24,7 +24,9 @@ final class SecureElementFailure extends SecurityException {
         if (Reason.NO_READABLE_EUICC.name().equals(code))
             return "No readable eUICC was found. Check the card and this ROM's Secure Element access policy.";
         if (Reason.AMBIGUOUS_EUICC.name().equals(code))
-            return "More than one readable eUICC was found. Automatic card selection is blocked.";
+            return "More than one readable eUICC was found. Choose the intended card before continuing.";
+        if (Reason.SELECTED_CARD_CHANGED.name().equals(code))
+            return "The explicitly selected card is missing or changed. Choose and verify a card again; no alternative was selected automatically.";
         if (Reason.CHANNEL_CLEANUP_FAILED.name().equals(code))
             return "A card channel could not be closed. Stop and verify the card connection before continuing.";
         if (Reason.INVALID_READER_INVENTORY.name().equals(code))

@@ -8,7 +8,7 @@ import org.json.JSONObject;
  * This is NOT a generic Binder, Shell, APDU, ICCID or filesystem RPC. The
  * companion's server checks SO_PEERCRED before invoking any of these methods.
  * Profile mutations delegate to the EXISTING EID-enrolled, two-phase, journaled
- * Shizuku backend implementation running at the same Shell UID2000.
+ * Shell backend implementation running at the same Shell UID2000.
  */
 final class CompanionProfileRpc {
     static final int PROTOCOL_VERSION = 2;
@@ -38,7 +38,7 @@ final class CompanionProfileRpc {
         return new JSONObject()
                 .put("version", PROTOCOL_VERSION)
                 .put("genericProfileManagement", true)
-                .put("usesShizuku", false)
+                .put("connectionMethod", "adb_shell")
                 .put("requiresAdbShellBootstrap", true)
                 .put("peerCredentialRequired", true)
                 .put("transactionReviewRequired", true)

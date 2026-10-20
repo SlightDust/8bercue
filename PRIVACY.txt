@@ -1,4 +1,4 @@
-8bercue privacy information — 19 October 2026
+8bercue privacy information — 20 October 2026
 
 Publisher: sid (individual)
 Privacy and support: support@sidnvy.com
@@ -22,8 +22,8 @@ operations do not require an 8bercue account or an 8bercue server.
 
 Camera access is optional and used to scan an activation QR code. Selected QR
 images are decoded on your phone. There is no advertising or analytics SDK.
-The optional Shizuku connection uses a separate app's privileged local service;
-the computer connection starts a privileged local service on your phone.
+The computer connection starts an authenticated ADB Shell service on your phone.
+No separate privilege-manager app is required.
 
 Transaction records contain hashes of card/profile identity, operation state,
 timestamps and verification metadata. Notification records also contain the

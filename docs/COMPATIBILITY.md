@@ -2,7 +2,7 @@
 
 Installing the APK and accessing an eUICC are separate requirements. Minimum SDK is 28 (Android 9), with ARM64 native components built for API 28. Compile/target SDK remains 36.
 
-The published v0.18.0-beta.1 APK (0.18.0-rc1 / 22) rejects management below API 36. The unpublished 0.18.1-rc9 / 31 candidate checks actual capabilities instead and includes an **experimental Shell Telephony fallback with scoped management protocols**. This is not general Android 13 qualification.
+The published v0.18.0-beta.1 APK (0.18.0-rc1 / 22) rejects management below API 36. The unpublished 0.18.1-rc10 / 32 candidate checks actual capabilities instead and includes an **experimental Shell Telephony fallback with scoped management protocols**. This is not general Android 13 qualification.
 
 ## Transports
 
@@ -21,9 +21,15 @@ Default Telephony channels remain read-only: GetEID, GetProfilesInfo and optiona
 
 Caller authentication, one-use confirmation tokens, complete card identity, exact inventory binding, fsynced journals and independent postflight checks remain mandatory. An optional expiring Shell-owned owner scope can further restrict a session to its original inventory and one independently identified disposable profile. It grants no new permission and an invalid existing scope fails closed.
 
-On this device, holding a notification read channel prevents opening a second usable ISD-R channel for identity verification. The candidate closes its owned read channel, re-identifies the complete card, then opens a dedicated acknowledged-removal channel. It never removes another client's channel. Cleanup failures are propagated to the parent coordinator and quarantine further writes.
+On the tested Android 13 Xiaomi, holding a notification read channel prevents opening a second usable ISD-R channel for identity verification. The candidate closes its owned read channel, re-identifies the complete card, then opens a dedicated acknowledged-removal channel. It never removes another client's channel. Cleanup failures are propagated to the parent coordinator and quarantine further writes.
 
 For profiles installed by this app with a delivered installation receipt, deletion now snapshots notification metadata before the write. After independently verified deletion, only a new deletion notification matching that complete profile identity, approved recipient and transaction may be posted once. Its sequence and kind are durably bound; removal follows operator acknowledgment. Profiles without a trusted installation receipt are not automatically assigned a notification recipient.
+
+## Current candidate and new-phone qualification
+
+Version 32 removes the Shizuku SDK, provider, UI choice and automatic SDK fallback. A computer-started authenticated Shell service is the only public setup flow. Reconnect after reboot, APK update or service termination; this is not permanent authorization.
+
+A fresh install on Redmi 26021RN18C / mist, HyperOS OS3.0.305.0.WPUCNXM, Android 16 / API 36 passed installation through the normal system package installer, launch, one ADB bootstrap and actual AIDL HAL SIM1 card access. Streamed ADB installation was rejected by HyperOS; this installation policy did not block the subsequent Shell-to-HAL connection. Native and Java reads agreed on an empty inventory, with complete card identity stable. UI read-only recheck, card information and background return passed. No fallback ROM exception, profile write, activation credential or notification delivery was used. Other backend support and populated-profile/write behavior on this target remain untested. See the [APK-bound record](AUTOMATIC_COMPATIBILITY.md#fresh-install-candidate-result-20-october-2026).
 
 ## Actual Android 13 results
 

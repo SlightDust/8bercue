@@ -4,7 +4,7 @@ import java.nio.channels.*;
 import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermissions;
 
-/** Same-process and cross-process exclusion for Shizuku and the legacy shell companion. */
+/** Same-process and cross-process exclusion for local Binder and the legacy shell companion. */
 public final class CardTransactionLock {
  private static final File ROOT=new File("/data/local/tmp/fiveber-lpac-lab");
  private static RandomAccessFile handle;

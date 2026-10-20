@@ -18,7 +18,8 @@ LAB_CLASSES = {
     'CompanionIngressTestInstrumentation', 'CompanionIngressNegativeProbe', 'UiLayoutTestInstrumentation',
 }
 FORBIDDEN = (b'5D7937BEFD986578', b'0A0E26091CA92454', b'QRF-SPEEDTEST',
-             b'8bercue-test-authority', b'rsp.truphone.com', b'com/tananaev/adblib/')
+             b'8bercue-test-authority', b'rsp.truphone.com', b'com/tananaev/adblib/',
+             b'Lrikka/shizuku/', b'Lmoe/shizuku/', b'Use Shizuku')
 
 def dex_strings(data):
     if data[:4] != b'dex\n' or len(data) < 112:
@@ -48,7 +49,7 @@ def verify(path):
         for name in dex:
             for value in dex_strings(archive.read(name)):
                 if any(marker.lower() in value.lower() for marker in FORBIDDEN):
-                    raise ValueError('Laboratory constant found in '+name)
+                    raise ValueError('Disallowed release content found in '+name)
                 for cls in LAB_CLASSES:
                     prefix=('Ldev/sid/fiveberinspector/'+cls).encode()
                     if value.startswith(prefix) and value[len(prefix):len(prefix)+1] in (b';',b'$'):

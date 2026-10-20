@@ -59,7 +59,7 @@ public final class ShellCompanion {
                     // Requests are authenticated by kernel SO_PEERCRED AND
                     // rechecked against the currently installed package UID.
                     // Bind the verified identity to this one socket request
-                    // so the existing Shizuku service's transaction logic can
+                    // so the existing Shell service's transaction logic can
                     // be reused without weakening its Binder caller checks.
                     try (ServiceCaller.VerifiedSocketCall verified =
                             ServiceCaller.enterVerifiedSocketCall(peer.getUid(), appUid)) {

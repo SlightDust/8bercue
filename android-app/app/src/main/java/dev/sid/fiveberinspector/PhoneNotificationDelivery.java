@@ -57,7 +57,7 @@ public final class PhoneNotificationDelivery {
           .put("notificationWorkerStopped",!CardTransactionLock.isQuarantined());
       if(!result.has("notificationPendingCount"))result.put("notificationPendingCount",0);
       if(!result.has("notificationCleanupAvailable"))result.put("notificationCleanupAvailable",false);
-      if(CardTransactionLock.isQuarantined())result.put("recoveryAction","restart_shizuku_then_refresh");
+      if(CardTransactionLock.isQuarantined())result.put("recoveryAction","reconnect_companion_then_verify");
     } catch(JSONException impossible) {throw new IllegalStateException("Notification status unavailable");}
     return result;
   }
@@ -122,7 +122,7 @@ public final class PhoneNotificationDelivery {
     for(Properties saved:journal.records())if(record.getProperty("id").equals(saved.getProperty("id")))durableOutcome=NotificationJournal.outcome(saved);
     JSONObject result=status(card).put("notificationStatus",durableOutcome)
         .put("notificationWorkerStopped",outcome.workerStopped&&!unsafeChannel.get());
-    if(!outcome.workerStopped||unsafeChannel.get())result.put("notificationReviewRequired",true).put("recoveryAction","restart_shizuku_then_refresh");
+    if(!outcome.workerStopped||unsafeChannel.get())result.put("notificationReviewRequired",true).put("recoveryAction","reconnect_companion_then_verify");
     return result;
   }
   private static String fingerprint(List<CardProfileInventory.Entry> entries) throws Exception {

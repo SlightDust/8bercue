@@ -25,20 +25,20 @@ Manage profiles on compatible removable eUICC cards, including 5ber, from a clea
 - View profiles and card information.
 - Rename, enable, disable and delete profiles.
 - Add an eSIM by scanning a QR code, importing an image or entering an activation code.
-- Connect through a computer or Shizuku.
+- Connect through a computer using ADB.
 - Review changes before applying them, with recovery tools for interrupted operations.
 
 ## Get started
 
-The APK installs on **ARM64 Android 9+**. Card management also requires a compatible eUICC and a system Secure Element channel that permits access to it. Android version and ADB access alone do not guarantee card access. Available management actions depend on the connection. See [device compatibility](docs/COMPATIBILITY.md).
+The APK installs on **ARM64 Android 9+**. Card management also requires a compatible eUICC and a usable HAL, Telephony or OMAPI channel with the required system permissions. Android version and ADB access alone do not guarantee card access. Available management actions depend on the connection. See [device compatibility](docs/COMPATIBILITY.md).
 
 This branch checks the actual card connection automatically: Secure Element HAL first, then Telephony, with OMAPI as another fallback. **Compatibility check** shows the selected channel and missing conditions. No phone-brand or Android 16 admission list is used. The published Beta retains its older limits.
 
-A computer with **ADB** can start the management connection; Shizuku is optional.
+Connect once with a computer using **ADB**. No separate privilege-manager app is required. Reconnect after a reboot, app update or service termination.
 
 1. Install the APK from [Releases](https://github.com/sidnvy/8bercue/releases).
-2. Open 8bercue and choose **Connect using computer**, or set up Shizuku in Settings.
-3. Connect your card and manage your profiles.
+2. Open 8bercue and choose **Connect using computer**.
+3. Open **Compatibility check** and confirm the selected channel and a fresh profile list before making changes. See [testing a new phone](docs/NEW_DEVICE_CHECK.md).
 
 For the computer connection, download `bootstrap_companion.py` from the same release and run:
 

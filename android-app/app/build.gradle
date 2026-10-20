@@ -10,8 +10,8 @@ android {
         applicationId 'dev.sid.fiveberinspector'
         minSdk 28
         targetSdk 36
-        versionCode 31
-        versionName '0.18.1-rc9'
+        versionCode 32
+        versionName '0.18.1-rc10'
     }
 
     buildFeatures {
@@ -73,8 +73,6 @@ android {
 
 dependencies {
     implementation files('libs/zxing-core-3.5.3.jar')
-    implementation 'dev.rikka.shizuku:api:13.1.5'
-    implementation 'dev.rikka.shizuku:provider:13.1.5'
 }
 
 // Lock all resolvable configurations; checksums are verified independently.

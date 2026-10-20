@@ -11,7 +11,6 @@ import android.view.*;
 import android.widget.*;
 import java.util.concurrent.*;
 import org.json.*;
-import rikka.shizuku.Shizuku;
 
 /** Three-screen local manager. No credential or transaction replay on recreation. */
 public final class MainActivity extends Activity {
@@ -22,9 +21,8 @@ public final class MainActivity extends Activity {
   private static final ExecutorService WORK = Executors.newSingleThreadExecutor();
   private static final UiOperationState OPERATIONS = new UiOperationState();
   private IProfileService backend;
-  private Shizuku.UserServiceArgs serviceArgs;
   private boolean directManagement;
-  private boolean binding, bound, fallback, companionManagement, destroyed, resumed, needsConnectionRead;
+  private boolean fallback, companionManagement, destroyed, resumed, needsConnectionRead;
   private android.net.Uri pendingImport;
   private int screen;
   private JSONObject inventory = new JSONObject(), cardInfo = new JSONObject(), compatibility = new JSONObject();
@@ -51,7 +49,7 @@ public final class MainActivity extends Activity {
   private final java.util.ArrayList<View> sheetControls = new java.util.ArrayList<>();
   private final java.util.ArrayList<View> taskControls = new java.util.ArrayList<>();
   private ProgressBar busyProgress;
-  private String title = "Connect your card", detail = "Connect using your computer, or choose Shizuku in Settings.",
+  private String title = "Connect your card", detail = "Connect using your computer to check this card.",
                  notice = "";
   private final Handler handler = new Handler(Looper.getMainLooper());
   private final Runnable watch = new Runnable() {
@@ -59,7 +57,7 @@ public final class MainActivity extends Activity {
       if (destroyed || !resumed)
         return;
       if (!OPERATIONS.running()) {
-        if (preferDirect() && backend == null) connectDirect();
+        if (backend == null) connectDirect();
         if (needsConnectionRead && backend != null) {
           needsConnectionRead = false;
           checkRecovery();
@@ -84,45 +82,6 @@ public final class MainActivity extends Activity {
       handler.postDelayed(this, 1000);
     }
   };
-  private final Shizuku.OnBinderReceivedListener received =
-      () -> runOnUiThread(this::connectIfGranted);
-  private final Shizuku.OnBinderDeadListener dead = () -> runOnUiThread(() -> {
-    if (companionManagement || directManagement) return; // Shizuku Binder death does not kill local Shell IPC.
-    backend = null;compatibility=new JSONObject();
-    bound = false;
-    binding = false;
-    status("Connection lost",
-        OPERATIONS.running() ? "Result unknown. Reconnect and verify; do not repeat the operation."
-                             : "Restart Shizuku and reconnect.");
-  });
-  private final Shizuku.OnRequestPermissionResultListener permission = (code, result) -> {
-    if (code == 901 && result == PackageManager.PERMISSION_GRANTED)
-      runOnUiThread(this::connect);
-  };
-  private final ServiceConnection connection = new ServiceConnection() {
-    public void onServiceConnected(ComponentName n, IBinder b) {
-      if (useCompanion() || preferDirect()) { binding = false; return; }
-      backend = IProfileService.Stub.asInterface(b);
-      companionManagement = false; fallback = false;
-      bound = true;
-      binding = false;
-      runOnUiThread(() -> {
-        if (destroyed) {
-          releaseWhenIdle();
-          return;
-        }
-        needsConnectionRead = true;
-        if (resumed && !OPERATIONS.running()) {
-          needsConnectionRead = false;
-          status("Connected", "Reading your card…");
-          checkRecovery();
-        }
-      });
-    }
-    public void onServiceDisconnected(ComponentName n) {
-      dead.onBinderDead();
-    }
-  };
   @Override
   public void onCreate(Bundle saved) {
     super.onCreate(saved);
@@ -134,35 +93,16 @@ public final class MainActivity extends Activity {
     getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
     if (saved != null)
       screen = saved.getInt("screen", 0);
-    // Owner-authorized Pixel-only internal beta migration. A previous
-    // transient fallback had incorrectly persisted preferCompanion=false.
-    // One-time explicit preference choices made AFTER this migration remain
-    // user-controlled; never rewrite the preference on future launches.
-    if (BuildConfig.DEBUG && LabSupport.socketEligible()
-        && !getPreferences(0).getBoolean("companionV2StrictPilotMigrated", false)) {
-      getPreferences(0).edit().putBoolean("preferCompanion", true)
-          .putBoolean("companionV2StrictPilotMigrated", true).commit();
-    }
     if (getPreferences(0).getBoolean("pending", false))
       notice = "Card and operation state need verification. Open Settings → Verify card and recovery. "
           + "Do not submit its activation code again.";
-    serviceArgs = new Shizuku
-                      .UserServiceArgs(
-                          new ComponentName(getPackageName(), ProfileUserService.class.getName()))
-                      .daemon(false)
-                      .processNameSuffix("fiveber-reader")
-                      .debuggable(BuildConfig.DEBUG)
-                      .version(BuildConfig.VERSION_CODE);
     render();
-    Shizuku.addBinderReceivedListenerSticky(received);
-    Shizuku.addBinderDeadListener(dead);
-    Shizuku.addRequestPermissionResultListener(permission);
   }
   @Override
   protected void onResume() {
     super.onResume();
     resumed = true;
-    connectIfGranted();
+    connectExistingCompanion();
     handler.removeCallbacks(watch);
     handler.post(watch);
   }
@@ -187,7 +127,6 @@ public final class MainActivity extends Activity {
   public void onConfigurationChanged(android.content.res.Configuration config) {
     super.onConfigurationChanged(config);
   }
-  private boolean preferDirect() {return getPreferences(0).getBoolean("preferDirectBinder", true);}
   private String managementUnavailable() { return ManagementAvailability.reason(Build.VERSION.SDK_INT, Build.SUPPORTED_ABIS); }
   private void connectDirect() {
     if(destroyed||!resumed||OPERATIONS.running()||backend!=null)return;
@@ -196,25 +135,25 @@ public final class MainActivity extends Activity {
     try {
       service.asBinder().linkToDeath(()->runOnUiThread(()->{
         if(backend!=service)return;
-        backend=null;compatibility=new JSONObject();bound=false;navigationSession++;dismissProfilePanel();
+        backend=null;compatibility=new JSONObject();navigationSession++;dismissProfilePanel();
         statusPreservingOutcome("Connection lost", "Start the computer connection again. Pending operations will not be repeated.");render();
       }),0);
-      backend=service;directManagement=true;companionManagement=true;fallback=false;bound=true;binding=false;
+      backend=service;directManagement=true;companionManagement=true;fallback=false;
       if(bootstrapSheet!=null){bootstrapSheet.dismiss();bootstrapSheet=null;}
       status("Connected", "Checking card and recovery state…");render();checkRecovery();
-    }catch(Exception unavailable){backend=null;compatibility=new JSONObject();bound=false;}
+    }catch(Exception unavailable){backend=null;compatibility=new JSONObject();}
   }
   private void beginDirectBootstrap() {
     if (!managementUnavailable().isEmpty()) { status("Device not supported by this build", managementUnavailable());return; }
     if(OPERATIONS.running()){status("Operation in progress", "Wait for verification before changing connection.");return;}
     try {CompanionBinderProvider.beginManagementBootstrap();}
-    catch(SecurityException active){getPreferences(0).edit().putBoolean("preferDirectBinder",true).apply();backend=null;compatibility=new JSONObject();connectDirect();return;}
-    backend=null;compatibility=new JSONObject();bound=false;binding=false;fallback=false;binderReadOnlyInventory=false;directManagement=true;companionManagement=true;
+    catch(SecurityException active){backend=null;compatibility=new JSONObject();connectDirect();return;}
+    backend=null;compatibility=new JSONObject();fallback=false;binderReadOnlyInventory=false;directManagement=true;companionManagement=true;
     navigationSession++;dismissProfilePanel();
-    getPreferences(0).edit().putBoolean("preferDirectBinder",true).apply();
+
     Sheet help=new Sheet("Connect using your computer");
     help.copy("Connect and authorize this phone with Android platform tools. Within two minutes, run the supplied bootstrap_companion.py with this phone's serial. Keep 8bercue open. No card changes happen during connection.");
-    help.copy("A new connection is needed after a reboot or app update. This connection uses no Shizuku.");
+    help.copy("Reconnect after a reboot, app update or service termination. Keep this app open during setup.");
     bootstrapSheet=help.dialog;
     help.button("Waiting for computer",false,help.dialog::dismiss);help.show();
   }
@@ -222,52 +161,14 @@ public final class MainActivity extends Activity {
     return LabSupport.socketEligible()
         && getPreferences(0).getBoolean("preferCompanion", true);
   }
-  private void connectIfGranted() {
-    if (destroyed || !resumed || binderReadOnlyInventory) return;
-    if (!managementUnavailable().isEmpty()) return;
-    if (preferDirect()) { connectDirect(); return; }
-    if (useCompanion()) {
-      if (BuildConfig.DEBUG) android.util.Log.i("FiveberCompanionPilot",
-          "connect_companion activeFallback=" + fallback
-          + " operationsRunning=" + OPERATIONS.running());
-      if (fallback) return;
-      if (!OPERATIONS.running()) probeFallback();
-      return;
-    }
-    try {
-      if (Shizuku.pingBinder()
-          && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-        connect();
-        return;
-      }
-    } catch (Throwable ignored) {
-    }
-    if (LabSupport.socketEligible() && !fallback && !OPERATIONS.running())
-      probeFallback();
+  private void connectExistingCompanion() {
+    if(destroyed||!resumed||binderReadOnlyInventory||!managementUnavailable().isEmpty())return;
+    connectDirect();
   }
   private void connect() {
-    if (!managementUnavailable().isEmpty()) { status("Device not supported by this build", managementUnavailable());return; }
-    if (destroyed || !resumed)
-      return;
-    try {
-      if (!Shizuku.pingBinder()) {
-        status("Shizuku is not running",
-            "Open Shizuku and start it using wireless debugging or the documented ADB setup. It "
-                + "may need restarting after a reboot.");
-        return;
-      }
-      if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-        Shizuku.requestPermission(901);
-        return;
-      }
-      if (bound || binding)
-        return;
-      binding = true;
-      Shizuku.bindUserService(serviceArgs, connection);
-    } catch (Throwable e) {
-      binding = false;
-      status("Connection unavailable", "Open Shizuku, check authorization, then reconnect.");
-    }
+    if (!managementUnavailable().isEmpty()) { status("Device not supported by this build",managementUnavailable());return; }
+    connectExistingCompanion();
+    if(backend==null)status("Connect your card","Choose Connect using computer and run the matching ADB setup script.");
   }
   private interface Job {
     JSONObject run() throws Exception;
@@ -379,13 +280,9 @@ public final class MainActivity extends Activity {
         },
         r -> {
           if (r.optBoolean("transportUnavailable", false)) {
-            // Only implicit Pixel-first discovery falls back automatically.
-            // An explicitly selected companion must never silently switch
-            // transports after an uncertain or interrupted operation.
-            // A temporarily unavailable companion must NOT silently and
-            // persistently change the owner's selected transport.
+            // A missing legacy socket must not change connection modes or replay an operation.
             status("Companion unavailable",
-                "Start the Shell Companion with ADB or select Shizuku in Settings.");
+                "Use Connect using computer and run the supplied ADB setup script.");
             return;
           }
           fallback = true;
@@ -394,36 +291,16 @@ public final class MainActivity extends Activity {
           inventory = r.getJSONObject("inventory");
           needsConnectionRead = companionManagement;
           status("Card connected", companionManagement
-              ? "Shell Companion management ready (no Shizuku). ADB setup may be needed after reboot."
-              : "Legacy companion is read-only. Connect Shizuku for management.");
+              ? "Computer connection ready. Reconnect after a reboot or app update."
+              : "Legacy companion is read-only. Use Connect using computer for management.");
           render();
         });
   }
-  private void selectTransport(boolean companion) {
-    if(OPERATIONS.running())return;
-    getPreferences(0).edit().putBoolean("preferDirectBinder",false).apply();
-    directManagement=false;
-    if (OPERATIONS.running()) {
-      status("Operation in progress", "Finish verification before changing transport.");
-      return;
-    }
-    if (companion && !LabSupport.socketEligible()) {
-      status("Unavailable", "Shell Companion is validated only on Pixel.");
-      return;
-    }
-    getPreferences(0).edit().putBoolean("preferCompanion", companion).apply();
-    if (bound || binding) {
-      try { Shizuku.unbindUserService(serviceArgs, connection, false); }
-      catch (Throwable ignored) {}
-      bound = false; binding = false;
-    }
-    backend = null;compatibility=new JSONObject(); fallback = false; companionManagement = false;
-    if (binderReadOnlyInventory) {
-      binderReadOnlyInventory = false;
-      inventory = new JSONObject(); // Never treat a prior read-only card view as a write preview.
-    }
-    if (companion) probeFallback();
-    else connectIfGranted();
+  private void selectLegacyCompanion() {
+    if(OPERATIONS.running()){status("Operation in progress","Wait for verification before changing connection.");return;}
+    if(!LabSupport.socketEligible())return;
+    directManagement=false;backend=null;compatibility=new JSONObject();fallback=false;companionManagement=false;
+    binderReadOnlyInventory=false;inventory=new JSONObject();probeFallback();
   }
   private void refresh() {
     final IProfileService s = backend;
@@ -604,9 +481,7 @@ public final class MainActivity extends Activity {
             getPreferences(0).edit().remove("pending").commit();
           if (r.optBoolean("restartRequired", false) || !r.optBoolean("notificationWorkerStopped", true)) {
             getPreferences(0).edit().putBoolean("pending", true).commit();
-            notice += companionManagement
-                ? "\nRestart the Shell Companion, reconnect and verify the card before another operation."
-                : "\nRestart Shizuku, reconnect and verify the card before another operation.";
+            notice += "\nReconnect the local service using your computer and verify the card before another operation.";
           }
           screen = 0;
           render();
@@ -694,7 +569,7 @@ public final class MainActivity extends Activity {
     if (screen == 1 && destination != 1) { clearCredentials();pendingImport = null;draft.changed(); }
     navigationSession++;
     if (destination != 1) { draft.form = false;showConfirmation = false; }
-    if (!getPreferences(0).getBoolean("pending", false)) { notice = "";title = backend != null ? "Card connected" : "Connect your card";detail = backend != null ? "" : "Choose a connection in Settings."; }
+    if (!getPreferences(0).getBoolean("pending", false)) { notice = "";title = backend != null ? "Card connected" : "Connect your card";detail = backend != null ? "" : "Connect using your computer."; }
     screen = destination;
     render();
   }
@@ -783,9 +658,8 @@ public final class MainActivity extends Activity {
     add(heading, 22);
     if (profiles == null) {
       add(text("Your eSIMs will appear here", 20, TEXT, true), 28);
-      add(text("Connect your card using a computer, or use Shizuku if you already have it set up.", 15, MUTED, false), 10);
+      add(text("Connect your phone using a computer to check its available card channels.", 15, MUTED, false), 10);
       add(action("Connect using computer", true, this::beginDirectBootstrap), 20);
-      add(action("Use Shizuku", false, () -> selectTransport(false)), 12);
       return;
     }
     for (int i = 0; i < profiles.length(); i++) {
@@ -1111,15 +985,14 @@ public final class MainActivity extends Activity {
     add(text("Connection", 19, TEXT, true), 24);
     add(text("Card connection: "+compatibility.optString("route","Not checked in this connection"),14,MUTED,false),8);
     add(action("Compatibility check",false,this::showCompatibility),12);
-    add(text(directManagement && backend != null ? "Independent Binder connected — no Shizuku"
-          : companionManagement ? "Shell Companion connected — no Shizuku"
-          : binderReadOnlyInventory ? "Standalone Binder read-only inventory — no Shizuku"
-          : backend != null ? "Shizuku connected"
+    add(text(directManagement && backend != null ? "Computer connection active"
+          : companionManagement ? "Local companion connected"
+          : binderReadOnlyInventory ? "Read-only diagnostic connection"
+          : backend != null ? "Computer connection active"
           : fallback ? "Read-only companion connected" : "Not connected", 15, MUTED, false), 8);
     if (LabSupport.socketEligible())
-      add(action("Use Shell Companion (no Shizuku)", useCompanion(), () -> selectTransport(true)), 12);
-    add(action("Connect using computer (no Shizuku)", preferDirect(), this::beginDirectBootstrap), 12);
-    add(action("Use Shizuku", !useCompanion() && !preferDirect(), () -> selectTransport(false)), 12);
+      add(action("Use legacy local companion", useCompanion(), this::selectLegacyCompanion), 12);
+    add(action("Connect using computer", backend==null, this::beginDirectBootstrap), 12);
     if (BuildConfig.DEBUG) add(action("Check direct Binder Companion (read-only)", false, () -> {
       run("Checking local Binder", false, () -> {
         ICompanionProbe probe = CompanionBinderProvider.service();
@@ -1186,8 +1059,9 @@ public final class MainActivity extends Activity {
     }), 12);
     add(action("Setup help  ›", false, () -> {
       Sheet help = new Sheet("Connect your card");
-      help.copy("With a computer: connect this phone, accept its debugging prompt, then choose Connect using computer and follow the supplied setup instructions. Repeat connection after an app update or phone restart.");
-      help.copy("With Shizuku: install the official app, start its service, then choose Use Shizuku and authorize 8bercue. Connections are selected explicitly; failed operations are not replayed.");help.button("Done", false, help.dialog::dismiss);help.show();
+      help.copy("Connect this phone by USB, enable USB debugging and accept the computer authorization prompt. Choose Connect using computer, then run the matching bootstrap_companion.py with this phone's ADB serial.");
+      help.copy("After connection, open Compatibility check. A connected service alone does not prove card access: confirm the selected card channel and a fresh profile list. No card changes are made by the check.");
+      help.copy("Reconnect after a phone restart, app update or service termination. Failed operations are never automatically repeated.");help.button("Done", false, help.dialog::dismiss);help.show();
     }), 12);
     add(text("Card", 19, TEXT, true), 28);
     add(text("EID  " + mask(cardInfo.optString("eidMasked", inventory.optString("eidMasked", "Not checked")))), 10);
@@ -1259,9 +1133,7 @@ public final class MainActivity extends Activity {
           notificationCleanupAvailable = result.optBoolean("notificationCleanupAvailable", false);
           notice = NotificationPresentation.message(notificationStatus);
           if (!result.optBoolean("notificationWorkerStopped", true))
-            notice += companionManagement
-                ? "\nRestart the Shell Companion, reconnect and verify the card before another operation."
-                : "\nRestart Shizuku, reconnect and verify the card before another operation.";
+            notice += "\nReconnect the local service using your computer and verify the card before another operation.";
           checkRecovery();
         });
       });
@@ -1306,7 +1178,7 @@ public final class MainActivity extends Activity {
   }
   private void exportDiagnostics() {
     String report = "8bercue " + BuildConfig.VERSION_NAME + "\nAndroid API "
-        + Build.VERSION.SDK_INT + "\nManagement connection: " + (backend == null ? "none" : directManagement ? "independent Binder" : companionManagement ? "Shell socket" : "Shizuku")
+        + Build.VERSION.SDK_INT + "\nManagement connection: " + (backend == null ? "none" : directManagement ? "independent Binder" : companionManagement ? "Shell socket" : "local Binder")
         + "\nLocal fallback: " + fallback + "\nProfile count: "
         + (inventory.optJSONArray("profiles") == null ? "unknown"
                                                       : inventory.optJSONArray("profiles").length())
@@ -1479,14 +1351,8 @@ public final class MainActivity extends Activity {
       handler.postDelayed(this::releaseWhenIdle, 1000);
       return;
     }
-    if (bound || binding) {
-      try {
-        Shizuku.unbindUserService(serviceArgs, connection, false);
-      } catch (Throwable ignored) {
-      }
-      bound = false;
-      binding = false;
-    }
+    // Detach the Activity only; never terminate a Shell worker during a transaction.
+    backend=null;
   }
   @Override
   protected void onDestroy() {
@@ -1496,9 +1362,6 @@ public final class MainActivity extends Activity {
     if (activeSheet != null) activeSheet.dismiss();
     destroyed = true;
     handler.removeCallbacks(watch);
-    Shizuku.removeBinderReceivedListener(received);
-    Shizuku.removeBinderDeadListener(dead);
-    Shizuku.removeRequestPermissionResultListener(permission);
     releaseWhenIdle();
     super.onDestroy();
   }

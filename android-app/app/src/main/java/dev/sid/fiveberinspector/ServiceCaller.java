@@ -1,6 +1,6 @@
 package dev.sid.fiveberinspector;
 
-/** Authenticate app calls for Shizuku Binder and the restricted Shell Companion. */
+/** Authenticate app calls for authenticated Binder and the restricted Shell Companion. */
 final class ServiceCaller {
     // A request from the legacy Unix-socket backend has no app Binder calling
     // identity. The server first validates SO_PEERCRED and only then installs
@@ -88,7 +88,7 @@ final class ServiceCaller {
                 }
             } finally { if (p.isAlive()) p.destroyForcibly(); }
         }
-        // Binder Shizuku still requires real app calling UID. Socket calls may
+        // Binder service still requires real app calling UID. Socket calls may
         // substitute only the verified SO_PEERCRED bound to this thread; every
         // request rechecks the package's current Linux UID to stop stale grants.
         Integer peerUid = verifiedSocketPeer.get();

@@ -22,7 +22,7 @@ public final class PortableProfileDownload {
         }
     }
     private static void requireShell() {
-        if(Process.myUid()!=Process.SHELL_UID)throw new SecurityException("Shizuku Shell UID required");
+        if(Process.myUid()!=Process.SHELL_UID)throw new SecurityException("Authorized ADB Shell UID required");
     }
     private static boolean qualified(String hash) {
         return EnrolledWritePolicy.isAllowed(hash);
@@ -88,7 +88,7 @@ public final class PortableProfileDownload {
                 .put("reviewRequired",true).put("cardReadRequired",true)
                 .put("workerStopped",false).put("retryAllowed",false)
                 .put("downloadDiagnostics",new JSONObject(attempt.diagnostics))
-                .put("recoveryAction","restart_shizuku_then_refresh");
+                .put("recoveryAction","reconnect_companion_then_verify");
             boolean exact=false,nativeSuccess=attempt.result!=null,unchanged=false;
             try {
                 FiveberReaderSelector.Target afterCard=FiveberReaderSelector.discover();

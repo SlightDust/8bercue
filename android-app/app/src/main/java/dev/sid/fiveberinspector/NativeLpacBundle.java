@@ -62,7 +62,7 @@ public final class NativeLpacBundle {
 
     static String installedApk() throws Exception {
         // For the original ADB Shell Companion the APK is the first
-        // CLASSPATH entry. For Shizuku UserService this environment variable
+        // CLASSPATH entry. For Shell service this environment variable
         // is not part of the public API, so do not assume it exists.
         // Fixed package lookup, NOT caller input or a general command shell.
         // The package manager itself returns the registered signed APK path.

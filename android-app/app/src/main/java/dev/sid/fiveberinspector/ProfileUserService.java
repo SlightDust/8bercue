@@ -6,20 +6,10 @@ import android.os.RemoteException;
 import org.json.JSONObject;
 import android.util.Log;
 
-/**
- * Shizuku UserService: the preferred cross-device transport.
- *
- * Shizuku starts this process as ADB Shell UID2000 and transports requests
- * over Binder. Unlike the old Shell Companion's Unix domain socket, this
- * survives Motorola's SELinux untrusted_app -> shell connectto restriction.
- *
- * Binder exposes reads and two-phase, opaque-token operations for the discovered card.
- * No arbitrary APDU, caller-supplied ICCID or generic shell command.
- * Full card identity and active-profile protections apply to each write.
- */
+/** Authenticated ADB Shell service. Typed reads and one-use, journaled operations only. */
 public final class ProfileUserService extends IProfileService.Stub {
     private final String transport;
-    public ProfileUserService() {this("Shizuku");}
+    public ProfileUserService() {this("ADB Shell");}
     ProfileUserService(String transport) {
         this.transport=transport;
         try {ServiceCaller.pinInstallation();} catch(Exception invalid){throw new SecurityException("Invalid service installation",invalid);}
@@ -31,7 +21,7 @@ public final class ProfileUserService extends IProfileService.Stub {
     @Override
     public String getStatus() {
         try { ServiceCaller.requireApp(); } catch (Exception e) { return "Unauthorized service caller"; }
-        Log.i("FiveberShizuku", "getStatus called shellUid="+(Process.myUid()==2000));
+        Log.i("EightberShell", "getStatus called shellUid="+(Process.myUid()==2000));
         boolean shell = Process.myUid() == Process.SHELL_UID;
         String classpath = System.getenv("CLASSPATH");
         boolean apkPath = classpath != null &&
@@ -45,7 +35,7 @@ public final class ProfileUserService extends IProfileService.Stub {
 
     @Override
     public synchronized String listProfiles() throws RemoteException {
-        Log.i("FiveberShizuku", "listProfiles entered shellUid="+(Process.myUid()==2000));
+        Log.i("EightberShell", "listProfiles entered shellUid="+(Process.myUid()==2000));
         if (Process.myUid() != Process.SHELL_UID)
             return "{\"ok\":false,\"error\":\"WrongUid\"}";
         String step="discover";
@@ -98,13 +88,13 @@ public final class ProfileUserService extends IProfileService.Stub {
             try { displayedLifecycleFingerprint = ProfileLifecycleGuard.selectionFingerprint(PortableProfileLifecycle.rows(entries)); }
             catch (SecurityException unsupportedMutationState) { /* Still display an empty/inactive card for recovery. */ }
             reply.put("profiles", profiles).put("count", profiles.length()).put("writeQualified",writeQualified);
-            reply.put("shizuku","Shizuku".equals(transport));
+            reply.put("connectionMethod","adb_shell");
             reply.put("transport",transport+" UID2000 / "+target.reader);
             CompatibilityReport compatibility=FiveberReaderSelector.compatibilityReport();
             reply.put("compatibility",compatibilityJson(compatibility,true));
             reply.put("connectionNotice","Card connection: "+compatibility.route()+". "+
                 (target.reader.startsWith(ReaderDescriptor.TELEPHONY_PREFIX)?"Experimental system-policy workaround; another ROM may block it.":target.reader.startsWith(ReaderDescriptor.HIDL_PREFIX)?"Card reads verified; management writes are not implemented for HIDL.":"Card reads verified; changes still require confirmation."));
-            Log.i("FiveberShizuku", "listProfiles success reader="+target.reader+" count="+reply.optInt("count",-1));
+            Log.i("EightberShell", "listProfiles success reader="+target.reader+" count="+reply.optInt("count",-1));
             reply.put("readOnly",true);
             return reply.toString();
         } catch (Throwable ex) {
@@ -113,11 +103,9 @@ public final class ProfileUserService extends IProfileService.Stub {
             while (cause instanceof java.lang.reflect.InvocationTargetException &&
                 ((java.lang.reflect.InvocationTargetException)cause).getTargetException()!=null)
                 cause=((java.lang.reflect.InvocationTargetException)cause).getTargetException();
-            Log.w("FiveberShizuku", "listProfiles failed stage="+step+
+            Log.w("EightberShell", "listProfiles failed stage="+step+
                 " cause="+cause.getClass().getSimpleName());
-            // On some Shizuku versions RemoteException from the UserService
-            // is swallowed by Binder and becomes a null String. Return a
-            // structured, sensitive-data-free error envelope instead.
+            // Return a structured, sensitive-data-free error envelope over Binder.
             displayedFingerprint=null;displayedCard=null;displayedLifecycleFingerprint=null;
             try {
                 JSONObject diagnostic=new JSONObject().put("ok",false).put("stage",step)

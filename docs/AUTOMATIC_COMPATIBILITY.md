@@ -1,6 +1,6 @@
 # Automatic card compatibility checks
 
-The unpublished 0.18.1-rc9 / 31 candidate selects a connection from actual read-only observations. The release has no phone-brand, model or Android 16 admission list. Installation still requires Android 9 / API 28 and ARM64 because of the packaged Java/native implementation. That minimum does not promise a usable card channel.
+The unpublished 0.18.1-rc10 / 32 candidate selects a connection from actual read-only observations. The release has no phone-brand, model or Android 16 admission list. Installation still requires Android 9 / API 28 and ARM64 because of the packaged Java/native implementation. That minimum does not promise a usable card channel.
 
 ## Selection and evidence
 
@@ -41,3 +41,15 @@ AIDL enumeration found no accessible instances. VINTF declared HIDL SIM1/eSE1, b
 The complete inventory fingerprint matched the pre-upgrade baseline; operation and notification files were byte-identical. Default data remained subscription 2, SIM states LOADED,LOADED, UID 10262 and app data/history were retained. Temporary test input/helpers were removed. This candidate submitted no profile mutation, download or notification delivery. Prior version-29 write-cycle results remain separate.
 
 296 synthetic compatibility/safety assertions passed; Release build and lint passed (0 errors, 59 warnings). APK metadata, official signature, native hashes and ELF/ZIP alignment passed. No generic Android-version, other-ROM, successful HIDL-hardware or new write qualification follows from these checks.
+
+## Fresh-install candidate result (20 October 2026)
+
+0.18.1-rc10 / 32, APK SHA-256 `a43a57f47432e1ff98aa6520f8d07235fab35d3a5540e8408530a0bf5e2d8af4`, was freshly installed on Redmi 26021RN18C / mist, Android 16 / API 36, HyperOS OS3.0.305.0.WPUCNXM, ARM64, 4 KB pages. The target initially had no application package. HyperOS rejected streamed ADB installation with INSTALL_FAILED_USER_RESTRICTED; opening the identical APK through the normal system package installer succeeded without changing USB-install settings. App UID is 10324. The installed APK was pulled back and its complete hash matched the delivered artifact.
+
+The release no longer contains the Shizuku SDK/provider or a Shizuku UI/fallback. The normal Connect using computer challenge, matching bootstrap script and authenticated Shell UID2000 service passed. The sheet closed automatically. Actual automatic discovery selected AIDL HAL SIM1, verified a complete eUICC identity and closed the owned channel; SIM2 reported no card, while eSE1 could not be reached. HIDL, Telephony and OMAPI were not attempted after this verified HAL selection. No ROM/model-specific exception was needed.
+
+Native lpac and Java independently read the same empty profile inventory (0 profiles, 0 enabled); complete card identity was stable before/after. An explicit UI read-only recheck and background/foreground return passed without a second bootstrap. Card information reported approximately 491 KB available. Home, Settings, compatibility details and setup help showed the actual route and the sole computer connection flow. Default-data subscription 1 and SIM states LOADED,ABSENT were unchanged. Temporary UI input and readback helpers were removed; the app and its live authenticated service were retained.
+
+This qualifies installation, launch, connection, card recognition and reading an empty profile list on that exact APK/device. It does not qualify displaying populated profiles on this target, downloads, writes, switching, deletion, notification delivery, network registration, mobile data or reboot persistence. No activation credentials, card mutation or notification HTTP was submitted. Older-device write authorization was not transferred. The Xiaomi Android 13 / version-31 and version-29 results above remain separate.
+
+The version-32 build passed 296 compatibility/safety assertions, Release compilation, lint (0 errors, 58 warnings), approved signing identity, native payload hash/ELF and APK ZIP alignment checks. A negative check rejected the previous SDK-bearing APK. The physical runtime here uses 4 KB pages; 16 KB alignment checks are not 16 KB-device runtime qualification.

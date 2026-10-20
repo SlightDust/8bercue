@@ -21,6 +21,7 @@ for field in ["name='dev.sid.fiveberinspector'","minSdkVersion:'28'","targetSdkV
     if field not in badging:raise SystemExit('FAIL APK metadata: '+field)
 if 'application-debuggable' in badging:raise SystemExit('FAIL debuggable release')
 tree=run('aapt2','dump','xmltree',a.apk,'--file','AndroidManifest.xml')
+if 'shizuku' in tree.lower():raise SystemExit('FAIL external privilege-manager provider or permission')
 if not re.search(r'android:allowBackup\([^)]*\)=(?:false|\(type 0x12\)0x0)(?:\s|$)',tree):raise SystemExit('FAIL backup must be disabled')
 run('zipalign','-c','-P','16','4',a.apk)
 signed=subprocess.run([str(a.build_tools/'apksigner'),'verify','--verbose','--print-certs',str(a.apk)],capture_output=True,text=True)

@@ -16,7 +16,7 @@ final class SecureElementFailure extends SecurityException {
     }
     static String message(String code) {
         if (Reason.ACCESS_DENIED.name().equals(code))
-            return "The system denies access to the eUICC applet. ADB or Shizuku alone cannot grant card access on this ROM.";
+            return "The system denies access to the eUICC applet. Starting the computer connection alone cannot grant missing card access on this ROM.";
         if (Reason.NO_SERVICE.name().equals(code))
             return "No accessible card service was found. Check the compatibility results for HAL, Telephony and OMAPI.";
         if (Reason.SYSTEM_INTERFACE_UNAVAILABLE.name().equals(code))

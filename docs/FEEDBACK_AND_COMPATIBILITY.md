@@ -23,3 +23,5 @@ authenticated ADB command, eUICC operation authorization, or profile write path.
 
 **Non-goals:** Google Play release, automatic device data collection,
 hardware eUICC write/switch tests, retroactive changes to a published Beta tag.
+
+Beta3 (48) embeds the owner-provided client DSN. See `release/REPORTING_BUILD.md` for reproduction. Consent defaults remain unchanged; no account token is packaged.

@@ -2,12 +2,14 @@
 """Validate release APK metadata and signature. Unsigned validation is explicitly separate."""
 import argparse, json, re, subprocess
 import zipfile
+from urllib.parse import urlsplit
 from pathlib import Path
 from verify_release_surface import verify
 
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('apk',type=Path);p.add_argument('--build-tools',type=Path,required=True)
 p.add_argument('--allow-unsigned',action='store_true')
+p.add_argument('--require-reporting',action='store_true',help='Reject a publication APK without a valid HTTPS client DSN')
 p.add_argument('--expected-signer-sha256');p.add_argument('--deny-signer-sha256',action='append',default=[])
 a=p.parse_args()
 for digest in a.deny_signer_sha256+([a.expected_signer_sha256] if a.expected_signer_sha256 else []):
@@ -21,6 +23,14 @@ for field in ["name='dev.sid.fiveberinspector'","minSdkVersion:'28'","targetSdkV
     if field not in badging:raise SystemExit('FAIL APK metadata: '+field)
 if 'application-debuggable' in badging:raise SystemExit('FAIL debuggable release')
 tree=run('aapt2','dump','xmltree',a.apk,'--file','AndroidManifest.xml')
+dsn_match=re.search(r'android:name\([^)]*\)="io\.sentry\.dsn"[^\n]*\n\s*A: android:value\([^)]*\)="([^"\n]*)"',tree)
+# aapt2 may retain the namespace URI prefix; accept its canonical dump form too.
+if not dsn_match:
+    dsn_match=re.search(r'android:name\([^)]*\)="io\.sentry\.dsn"[^\n]*\n\s*A: http://schemas.android.com/apk/res/android:value\([^)]*\)="([^"\n]*)"',tree)
+dsn=urlsplit(dsn_match.group(1) if dsn_match else '')
+configured=dsn.scheme=='https' and bool(dsn.hostname) and bool(dsn.username) and dsn.password is None and bool(re.fullmatch(r'/[0-9]+',dsn.path)) and not dsn.query and not dsn.fragment
+if a.require_reporting and not configured:raise SystemExit('FAIL configured HTTPS reporting DSN required')
+result['reportingConfiguration']='CONFIGURED' if configured else 'UNAVAILABLE'
 if 'shizuku' in tree.lower():raise SystemExit('FAIL external privilege-manager provider or permission')
 if not re.search(r'android:allowBackup\([^)]*\)=(?:false|\(type 0x12\)0x0)(?:\s|$)',tree):raise SystemExit('FAIL backup must be disabled')
 run('zipalign','-c','-P','16','4',a.apk)

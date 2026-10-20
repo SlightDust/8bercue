@@ -5,10 +5,24 @@ public final class UiFlowOfflineTest {
  public static void main(String[] args)throws Exception{
   String path="/data/app/~~Abc+=/dev.sid.fiveberinspector-X_y9==/base.apk";
   String command=ConnectionCommand.forApk(path);
-  check(command.startsWith("adb shell 'test \"$(am get-current-user)\" = 0 || exit 1;"),"Owner check must run on Android, not host");
-  check(command.contains("CLASSPATH="+path+" nohup app_process /"),"Load this installed APK only");
-  check(command.contains("CompanionManagementStarter --connect-management"),"Authenticated typed entrypoint");
+  check(command.startsWith("adb shell 'p=$(pm path dev.sid.fiveberinspector"),"Resolve installed APK on Android, not host");
+  check(command.contains("CLASSPATH=${p#package:} app_process / dev.sid.fiveberinspector.Connect"),"Use the reporting foreground entrypoint");
+  check(!command.contains("/dev/null")&&!command.endsWith("&'"),"Do not silently background the connection status client");
   check(!command.contains("python")&&!command.contains("curl")&&!command.contains("wget"),"No external download or interpreter");
+  check(command.equals(ConnectionCommand.forApk(path.replace("Abc", "NewInstallation"))),"Stable across installation paths and phones");
+  check(!command.contains(path),"Do not expose installation-specific directory in copied command");
+  check(ConnectionFeedback.countdown(120000).contains("2:00"),"Visible initial two-minute window");
+  check(ConnectionFeedback.countdown(1001).contains("0:02"),"Countdown rounds up");
+  check(ConnectionFeedback.countdown(-1).equals("Connection window expired"),"Expired window never shows negative time");
+  for(String code:new String[]{"STARTING","WINDOW_CLOSED","APP_CHANGED","WINDOW_CHANGED","APP_CLOSED","START_FAILED","TIMEOUT"}){
+    check(ConnectionFeedback.allowed(code),"Only documented bootstrap states");
+    check(!ConnectionFeedback.message(code).isEmpty(),"Every connection state has recovery guidance");
+  }
+  for(String bad:new String[]{null,"","CONNECTED","profile ICCID secret","MANAGEMENT_BINDER_READY"})check(!ConnectionFeedback.allowed(bad),"Reject arbitrary/success feedback: only a verified Binder establishes connection");
+  check(ConnectionFeedback.code(new java.lang.reflect.InvocationTargetException(new SecurityException("Start connection from the app first"))).equals("WINDOW_CLOSED"),"Unwrap system Binder errors");
+  check(ConnectionFeedback.code(new RuntimeException("private activation-code or ICCID")).equals("START_FAILED"),"Unknown exception cannot leak identifiers");
+  check(ConnectionFeedback.message("WINDOW_CLOSED").contains("Connect using computer"),"Closed window tells user where to authorize");
+  check(ConnectionFeedback.message("TIMEOUT").contains("late connection"),"Timeout is unconfirmed, not a false failure guarantee");
   for(String invalid:new String[]{"/sdcard/app.apk",path+";id",path+"\n",path.replace("X_y9","X'Y"),path.replace("X_y9","X$(id)"),"/data/app/other-app/base.apk",null}){boolean rejected=false;try{ConnectionCommand.forApk(invalid);}catch(IllegalArgumentException e){rejected=true;}check(rejected,"Reject untrusted path");}
   check(RecoveryUiPolicy.needsCardChoice("AMBIGUOUS_EUICC"),"Unselected multi-card is a selection step, not a lost write");
   check(!RecoveryUiPolicy.needsCardChoice("CHANNEL_CLEANUP_FAILED"),"Unconfirmed cleanup still blocks recovery");

@@ -40,7 +40,7 @@ Connect once with a computer using **ADB**. No separate privilege-manager app is
 2. Open 8bercue and choose **Connect using computer**.
 3. Open **Compatibility check** and confirm the selected channel and a fresh profile list before making changes. See [testing a new phone](docs/NEW_DEVICE_CHECK.md).
 
-On the connection screen, choose **Copy ADB command** and run it in your computer’s terminal within two minutes. The command starts the authenticated Shell service bundled in the installed APK; no Python script or separate helper app is required. If several devices are attached, use `adb -s SERIAL shell` for the intended phone. 8bercue confirms the connection and checks card access automatically.
+On the connection screen, choose **Copy ADB command** and run it while the two-minute timer is active. The command stays the same across installations and updates; it finds the installed APK automatically. Your terminal confirms the authenticated connection or explains why it failed. If the window expires, choose **Start connection again** and rerun the same command. No Python script or separate helper app is required. With several devices attached, use `adb -s SERIAL shell` for the intended phone. Card access is checked separately after connection.
 
 Manage the selected card from the profile list. Open a profile to turn it on/off, rename it or delete it. Switching and saving a nickname execute directly; installation and deletion require confirmation. Enabled profiles must be turned off before deletion. Connection, compatibility and recovery details are in Settings.
 

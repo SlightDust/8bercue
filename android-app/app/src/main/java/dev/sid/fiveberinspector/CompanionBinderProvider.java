@@ -20,14 +20,18 @@ public final class CompanionBinderProvider extends ContentProvider {
 
     static final String MANAGEMENT_METHOD="publishManagementBinder";
     static final String CHALLENGE_METHOD="getManagementChallenge";
+    static final String STATE_METHOD="getManagementConnectionState";
+    static final String FEEDBACK_METHOD="reportManagementConnection";
     static final int MANAGEMENT_VERSION=1;
+    private static String bootstrapFeedback="";
+    static synchronized String bootstrapFeedback(){return bootstrapFeedback;}
     private static IBinder management;
     private static String pendingNonce;
     private static long pendingUntil;
     private static final IBinder clientLifetime = new Binder();
     static synchronized void beginManagementBootstrap(){
         if(management!=null&&management.pingBinder())throw new SecurityException("Management session already exists");
-        pendingNonce=OperationTokens.create();pendingUntil=android.os.SystemClock.elapsedRealtime()+120000;
+        bootstrapFeedback="";pendingNonce=OperationTokens.create();pendingUntil=android.os.SystemClock.elapsedRealtime()+120000;
     }
     static synchronized IProfileService management(){
         if(management==null||!management.pingBinder()){management=null;return null;}
@@ -35,6 +39,11 @@ public final class CompanionBinderProvider extends ContentProvider {
     }
     private Bundle managementCall(String method,Bundle extras){
       synchronized(CompanionBinderProvider.class){
+        if(STATE_METHOD.equals(method)){
+            Bundle result=new Bundle();result.putBoolean("connected",management()!=null);
+            result.putInt("protocol",MANAGEMENT_VERSION);result.putInt("versionCode",BuildConfig.VERSION_CODE);
+            return result;
+        }
         if(pendingNonce==null||android.os.SystemClock.elapsedRealtime()>=pendingUntil)
             throw new SecurityException("Start connection from the app first");
         if(CHALLENGE_METHOD.equals(method)){
@@ -45,6 +54,11 @@ public final class CompanionBinderProvider extends ContentProvider {
         if(extras==null||!pendingNonce.equals(extras.getString("nonce"))
             ||extras.getInt("protocol")!=MANAGEMENT_VERSION||extras.getInt("versionCode")!=BuildConfig.VERSION_CODE)
             throw new SecurityException("Bootstrap session mismatch");
+        if(FEEDBACK_METHOD.equals(method)){
+            String code=extras.getString("code");
+            if(!ConnectionFeedback.allowed(code))throw new SecurityException("Invalid connection feedback");
+            bootstrapFeedback=code;Bundle result=new Bundle();result.putBoolean("accepted",true);return result;
+        }
         IBinder next=extras.getBinder("managementBinder");
         try {
             String expected=NativeLpacBundle.digest(new java.io.File(getContext().getApplicationInfo().sourceDir));
@@ -53,7 +67,7 @@ public final class CompanionBinderProvider extends ContentProvider {
                 throw new SecurityException("Invalid management interface");
             if(management!=null&&management.pingBinder())throw new SecurityException("Existing management session");
             next.linkToDeath(()->{synchronized(CompanionBinderProvider.class){if(management==next)management=null;}},0);
-            management=next;pendingNonce=null;pendingUntil=0;
+            management=next;pendingNonce=null;pendingUntil=0;bootstrapFeedback="";
             Bundle result=new Bundle();result.putBoolean("accepted",true);return result;
         }catch(Exception failure){throw new SecurityException("Management handoff rejected",failure);}
     }
@@ -71,7 +85,7 @@ public final class CompanionBinderProvider extends ContentProvider {
     @Override public Bundle call(String method, String arg, Bundle extras) {
         android.util.Log.i("EightberBinderPilot", "provider_call_arrived shellUid="+(Binder.getCallingUid()==Process.SHELL_UID));
         if(Binder.getCallingUid()==Process.SHELL_UID
-                &&(MANAGEMENT_METHOD.equals(method)||CHALLENGE_METHOD.equals(method)))return managementCall(method,extras);
+                &&(MANAGEMENT_METHOD.equals(method)||CHALLENGE_METHOD.equals(method)||STATE_METHOD.equals(method)||FEEDBACK_METHOD.equals(method)))return managementCall(method,extras);
         if (Binder.getCallingUid() != Process.SHELL_UID || !METHOD.equals(method)
                 || extras == null) throw new SecurityException("Shell Binder ingress only");
         IBinder b = extras.getBinder(KEY);

@@ -1,6 +1,6 @@
 # Selected-card UI and ADB onboarding candidate
 
-Unpublished 0.19.0-rc5, versionCode 38. No release upload is authorized.
+Historical UI qualification: unpublished 0.19.0-rc5, versionCode 38. The current connection refinement is 0.19.0-rc7 / 40; see [computer connection](ADB_CONNECTION.md) and its separate exact-build qualification. No release upload is authorized.
 
 The homepage manages one explicitly selected eUICC. Settings is in the top-right app bar; no bottom navigation is added. Profiles have a dedicated detail page with a native Use this eSIM switch and direct Rename/Delete actions. Switching and nickname Save use one explicit user gesture followed by the existing authenticated prepare/execute pair. Installation and deletion retain confirmation; enabled profiles cannot be deleted. Journals, unknown-result recovery, identity checks and one-use tokens remain in the service.
 

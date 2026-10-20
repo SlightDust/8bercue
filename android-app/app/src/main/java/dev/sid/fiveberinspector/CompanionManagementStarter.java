@@ -3,7 +3,7 @@ import android.os.*;
 import java.lang.reflect.Method;
 /** Independent typed management Binder. No arbitrary RPC, APDU or command input. */
 public final class CompanionManagementStarter {
- private static Bundle call(Object provider,String method,Bundle extras)throws Exception {
+ static Bundle call(Object provider,String method,Bundle extras)throws Exception {
   Object attribution=Build.VERSION.SDK_INT>=31?attribution():null;
   for(Method m:provider.getClass().getMethods()){
    Class<?>[] t=m.getParameterTypes();
@@ -14,7 +14,14 @@ public final class CompanionManagementStarter {
   throw new UnsupportedOperationException("Provider interface unavailable");
  }
  @android.annotation.TargetApi(31) private static Object attribution(){return new android.content.AttributionSource.Builder(2000).setPackageName("com.android.shell").build();}
- public static void main(String[]args)throws Exception {
+ public static void main(String[]args) {
+  try { run(args); }
+  catch (Exception failure) {
+    System.err.println("8BERCUE_ERROR:" + ConnectionFeedback.code(failure));
+    System.err.flush(); System.exit(1);
+  }
+ }
+ private static void run(String[]args)throws Exception {
   if(android.os.Process.myUid()!=2000||args.length!=1||!"--connect-management".equals(args[0]))throw new SecurityException("Explicit Shell bootstrap required");
   Looper.prepareMainLooper();
   try(SystemProviderBridge.Connection connection=SystemProviderBridge.acquire("dev.sid.fiveberinspector.companion")) {

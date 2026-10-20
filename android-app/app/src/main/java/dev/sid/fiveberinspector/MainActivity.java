@@ -22,6 +22,8 @@ public final class MainActivity extends Activity {
   private String connectionCommand = "";
   private long connectionDeadline;
   private boolean connectionExpired;
+  private TextView connectionCountdown;
+  private String connectionFeedback = "";
   private boolean restoreDetailAfterRead;
   private final java.util.ArrayList<String> recentResults = new java.util.ArrayList<>();
   private static final int QR = 40, IMAGE = 41;
@@ -83,7 +85,19 @@ public final class MainActivity extends Activity {
           importImage(uri);
         }
       }
-      if(screen==6 && !connectionExpired && backend==null && android.os.SystemClock.elapsedRealtime()>=connectionDeadline){connectionExpired=true;status("Connection window expired","Start again to create a fresh connection window.");render();}
+      if(screen==6 && backend==null){
+        long remaining=connectionDeadline-android.os.SystemClock.elapsedRealtime();
+        if(connectionCountdown!=null)connectionCountdown.setText(ConnectionFeedback.countdown(remaining));
+        if(!connectionExpired && remaining<=0){
+          connectionExpired=true;statusPreservingOutcome("Connection window expired","Tap Start connection again, then rerun the same command.");render();
+        } else if(!connectionExpired){
+          String feedback=CompanionBinderProvider.bootstrapFeedback();
+          if(!feedback.isEmpty()&&!feedback.equals(connectionFeedback)){
+            connectionFeedback=feedback;
+            statusPreservingOutcome("STARTING".equals(feedback)?"Starting local service":"Connection not completed",ConnectionFeedback.message(feedback));
+          }
+        }
+      }
       handler.postDelayed(this, 1000);
     }
   };
@@ -158,7 +172,7 @@ public final class MainActivity extends Activity {
 
     try { connectionCommand=ConnectionCommand.forApk(getApplicationInfo().sourceDir); }
     catch(IllegalArgumentException invalid){status("Command unavailable","Reinstall the verified APK before connecting.");render();return;}
-    connectionDeadline=android.os.SystemClock.elapsedRealtime()+120000;connectionExpired=false;statusPreservingOutcome("Waiting for computer","Copy the command below and run it within two minutes.");screen=6;render();
+    connectionDeadline=android.os.SystemClock.elapsedRealtime()+120000;connectionExpired=false;connectionFeedback="";statusPreservingOutcome("Waiting for computer","Copy the command below and run it within two minutes.");screen=6;render();
   }
 
   private boolean useCompanion() {
@@ -716,7 +730,28 @@ public final class MainActivity extends Activity {
   private void detailFact(String label,String value){LinearLayout row=new LinearLayout(this);row.setPadding(0,dp(14),0,dp(14));row.addView(text(label,13,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));TextView v=text(mask(value),13,TEXT,false);v.setGravity(Gravity.END);row.addView(v,new LinearLayout.LayoutParams(0,-2,2));add(row,0);addDivider();}
   private void renameScreen(){if(detailProfile==null)return;add(text(cardLabel()+" · EID "+inventory.optString("eidMasked","Not reported"),12,MUTED,false),18);add(text(profileName(detailProfile)+" · "+selectedIccid),22);EditText name=input("Nickname",false);name.setText(detailProfile.optString("nickname",""));add(name,22);add(text("Leave blank to use the operator name.",12,MUTED,false),10);add(action("Save",true,()->{if(!detailCurrent())return;String value=name.getText().toString().trim();if(value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>64||value.matches("(?s).*[\\p{Cntrl}].*")){name.setError("Use at most 64 UTF-8 bytes without control characters");return;}hideKeyboard();prepare("rename",selectedProfile,value);}),28);add(action("Cancel",false,()->{screen=3;navigationSession++;render();}),8);}
   private void recordsScreen(){add(text("Operation results",22,TEXT,false),24);add(text("This session’s results are shown here. Durable safety records remain in the Shell service; diagnostics omit profile identifiers."),12);for(String value:recentResults)add(text(value,16,TEXT,false),18);if(recentResults.isEmpty())add(text("No operations in this app session."),24);add(action("Verify card and recovery",false,this::reconcile),24);add(action("Export safe diagnostics",false,this::exportDiagnostics),12);}
-  private void connectionScreen(){add(text("Connect with ADB.",28,TEXT,false),28);add(text("One command on your computer. No extra script or app."),12);add(text("1. Connect this phone",18,TEXT,true),28);add(text("Enable USB debugging and authorize your trusted computer. If more than one device is connected, use adb -s SERIAL shell for this phone."),10);add(text("2. Copy and run the command",18,TEXT,true),28);TextView command=text(connectionCommand,12,TEXT,false);command.setTypeface(android.graphics.Typeface.MONOSPACE);command.setTextIsSelectable(true);command.setPadding(dp(16),dp(16),dp(16),dp(16));command.setBackground(rounded(SURFACE,12));add(command,14);Button copy=action("Copy ADB command",true,()->{android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);clipboard.setPrimaryClip(ClipData.newPlainText("8bercue ADB connection",connectionCommand));statusPreservingOutcome("Waiting for computer","Command copied. Run it within two minutes and keep this screen open.");});availability(copy,!connectionExpired);add(copy,18);if(connectionExpired)add(action("Start connection again",true,this::beginDirectBootstrap),12);add(text("3. Keep this screen open",18,TEXT,true),28);add(text("Connection completes automatically, then card access is checked. This command changes no profiles."),10);add(text("Reconnect after a reboot, app update or service termination. If the connection window expires, go back and start again.",12,MUTED,false),24);}
+  private void connectionScreen(){
+    add(text("Connect with ADB.",28,TEXT,false),28);
+    add(text("One command. No extra script, Shizuku or root."),12);
+    connectionCountdown=text(ConnectionFeedback.countdown(connectionDeadline-android.os.SystemClock.elapsedRealtime()),14,connectionExpired?ERROR:ACCENT,true);
+    add(connectionCountdown,20);
+    add(text("1. Connect this phone",18,TEXT,true),24);
+    add(text("Enable USB debugging and authorize your trusted computer. Keep 8bercue open on this page."),10);
+    add(text("2. Run this on your computer",18,TEXT,true),24);
+    TextView command=text(connectionCommand,12,TEXT,false);
+    command.setTypeface(android.graphics.Typeface.MONOSPACE);command.setTextIsSelectable(true);
+    command.setPadding(dp(16),dp(16),dp(16),dp(16));command.setBackground(rounded(SURFACE,12));add(command,14);
+    Button copy=action("Copy ADB command",true,()->{
+      android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+      clipboard.setPrimaryClip(ClipData.newPlainText("8bercue ADB connection",connectionCommand));
+      statusPreservingOutcome("Command copied","Run it while the timer is active. Your computer will confirm the connection or explain why it failed.");
+    });availability(copy,!connectionExpired);add(copy,18);
+    add(action("Start connection again",connectionExpired,this::beginDirectBootstrap),8);
+    add(text("The command stays the same after app updates. With several phones attached, replace adb shell with adb -s SERIAL shell for this phone.",12,MUTED,false),16);
+    add(text("3. Wait for connection confirmation",18,TEXT,true),24);
+    add(text("Your computer must say “8bercue connected” or “already connected”. This page then closes automatically and card access is checked. A running process alone does not confirm a connection."),10);
+    add(text("No profiles are changed by connecting. If the timer expires, tap Start connection again and rerun the same command. Reconnect after a reboot, app update or service termination.",12,MUTED,false),20);
+  }
   private GradientDrawable rounded(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
   private void ripple(View v){android.util.TypedValue value=new android.util.TypedValue();getTheme().resolveAttribute(android.R.attr.selectableItemBackground,value,true);v.setBackgroundResource(value.resourceId);}
   private void availability(View control,boolean allowed){controlAvailability.put(control,allowed);control.setEnabled(allowed&&!OPERATIONS.running());control.setAlpha(control.isEnabled()?1f:.45f);}

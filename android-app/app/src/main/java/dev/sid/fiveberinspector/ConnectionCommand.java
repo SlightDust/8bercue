@@ -1,9 +1,14 @@
 package dev.sid.fiveberinspector;
-/** Fixed, APK-bound ADB entrypoint. No downloaded helper or host Python dependency. */
+/** Resolve the installed, package-manager-owned APK each time; no downloaded script. */
 final class ConnectionCommand {
   static String forApk(String path) {
-    if(path==null||path.contains("/../")||path.contains("/./")||!path.matches("/data/app/[A-Za-z0-9_~./+=-]+/base\\.apk")||!path.contains("/dev.sid.fiveberinspector-"))throw new IllegalArgumentException("Unexpected installed APK path");
-    return "adb shell 'test \"$(am get-current-user)\" = 0 || exit 1; CLASSPATH="+path+" nohup app_process / --nice-name=8bercue-management-v1 dev.sid.fiveberinspector.CompanionManagementStarter --connect-management > /dev/null 2>&1 < /dev/null &'";
+    if (!validApk(path)) throw new IllegalArgumentException("Unexpected installed APK path");
+    return "adb shell 'p=$(pm path dev.sid.fiveberinspector | head -n 1); CLASSPATH=${p#package:} app_process / dev.sid.fiveberinspector.Connect'";
   }
-  private ConnectionCommand(){}
+  static boolean validApk(String path) {
+    return path != null && !path.contains("/../") && !path.contains("/./")
+        && path.matches("/data/app/[A-Za-z0-9_~./+=-]+/base\\.apk")
+        && path.contains("/dev.sid.fiveberinspector-");
+  }
+  private ConnectionCommand() {}
 }

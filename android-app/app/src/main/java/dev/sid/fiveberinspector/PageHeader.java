@@ -26,7 +26,7 @@ final class PageHeader extends LinearLayout {
     if (settings != null) titleParams.rightMargin = dp(8);
     addView(heading, titleParams);
     if (settings != null)
-      addView(slot(activity, "settings", "Settings", settings), new LayoutParams(dp(48), dp(48)));
+      addView(slot(activity, "settings", s(R.string.ui_settings), settings), new LayoutParams(dp(48), dp(48)));
   }
   private View slot(Activity activity, String glyph, String description, Runnable click) {
     if (click == null) {
@@ -64,5 +64,7 @@ final class PageHeader extends LinearLayout {
       return insets;
     });
   }
+  private String s(int id) { return getResources().getString(id); }
+  private String s(int id, Object... args) { return getResources().getString(id, args); }
   private int dp(float value) { return Math.round(getResources().getDisplayMetrics().density * value); }
 }

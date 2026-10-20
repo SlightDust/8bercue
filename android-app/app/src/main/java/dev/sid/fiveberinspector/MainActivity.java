@@ -55,7 +55,7 @@ public final class MainActivity extends Activity {
   private final java.util.ArrayList<View> sheetControls = new java.util.ArrayList<>();
   private final java.util.ArrayList<View> taskControls = new java.util.ArrayList<>();
   private ProgressBar busyProgress;
-  private String title = "Connect your card", detail = "Connect using your computer to check this card.",
+  private String title = "", detail = "",
                  notice = "";
   private final Handler handler = new Handler(Looper.getMainLooper());
   private final Runnable watch = new Runnable() {
@@ -69,11 +69,10 @@ public final class MainActivity extends Activity {
           checkRecovery();
         } else if (OPERATIONS.claimReconciliation(resumed)) {
           if (OPERATIONS.completedMutation()) {
-            notice = "An operation ended while this screen was unavailable. Verify the card before "
-                     + "continuing; do not repeat the operation.";
-            statusPreservingOutcome("Needs verification", "Reading the card to establish its current state.");
+            notice = s(R.string.ui_an_operation_ended_while_this_screen_was_unavailable_verify_the);
+            statusPreservingOutcome(s(R.string.ui_needs_verification), s(R.string.ui_reading_the_card_to_establish_its_current_state));
           } else
-            status("Check ended", "Refreshing the card after the interrupted screen.");
+            status(s(R.string.ui_check_ended), s(R.string.ui_refreshing_the_card_after_the_interrupted_screen));
           render();
           if (backend != null)
             checkRecovery();
@@ -87,23 +86,25 @@ public final class MainActivity extends Activity {
       }
       if(screen==6 && backend==null){
         long remaining=connectionDeadline-android.os.SystemClock.elapsedRealtime();
-        if(connectionCountdown!=null)connectionCountdown.setText(ConnectionFeedback.countdown(remaining));
+        if(connectionCountdown!=null)connectionCountdown.setText(countdown(remaining));
         if(!connectionExpired && remaining<=0){
-          connectionExpired=true;statusPreservingOutcome("Connection window expired","Tap Start connection again, then rerun the same command.");render();
+          connectionExpired=true;statusPreservingOutcome(s(R.string.ui_connection_window_expired),s(R.string.ui_tap_start_connection_again_then_rerun_the_same_command));render();
         } else if(!connectionExpired){
           String feedback=CompanionBinderProvider.bootstrapFeedback();
           if(!feedback.isEmpty()&&!feedback.equals(connectionFeedback)){
             connectionFeedback=feedback;
-            statusPreservingOutcome("STARTING".equals(feedback)?"Starting local service":"Connection not completed",ConnectionFeedback.message(feedback));
+            statusPreservingOutcome("STARTING".equals(feedback)?s(R.string.ui_starting_local_service):s(R.string.ui_connection_not_completed),UiMessages.known(MainActivity.this,ConnectionFeedback.message(feedback)));
           }
         }
       }
       handler.postDelayed(this, 1000);
     }
   };
+  @Override protected void attachBaseContext(Context base){super.attachBaseContext(AppLanguage.wrap(base));}
   @Override
   public void onCreate(Bundle saved) {
     super.onCreate(saved);
+    title = s(R.string.ui_connect_your_card); detail = s(R.string.ui_connect_using_your_computer_to_check_this_card);
     if (Build.VERSION.SDK_INT >= 33)
       getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
           android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::handleBack);
@@ -113,8 +114,7 @@ public final class MainActivity extends Activity {
     if (saved != null)
       screen = saved.getInt("screen", 0) == 2 ? 2 : 0;
     if (getPreferences(0).getBoolean("pending", false))
-      notice = "Card and operation state need verification. Open Settings → Verify card and recovery. "
-          + "Do not submit its activation code again.";
+      notice = s(R.string.ui_card_and_operation_state_need_verification_open_settings_verify);
     render();
   }
   @Override
@@ -145,7 +145,38 @@ public final class MainActivity extends Activity {
   public void onConfigurationChanged(android.content.res.Configuration config) {
     super.onConfigurationChanged(config);
   }
-  private String managementUnavailable() { return ManagementAvailability.reason(Build.VERSION.SDK_INT, Build.SUPPORTED_ABIS); }
+  private String canonicalTitle(){
+    if(title.equals(s(R.string.ui_card_connected)))return "Card connected";
+    if(title.equals(s(R.string.ui_check_complete)))return "Check complete";
+    if(title.equals(s(R.string.ui_card_selected)))return "Card selected";
+    if(title.equals(s(R.string.ui_connected)))return "Connected";
+    return title;
+  }
+  private String operationLabel(String op){return switch(op){
+    case "switch" -> s(R.string.operation_switch);case "disable" -> s(R.string.operation_disable);
+    case "rename" -> s(R.string.operation_rename);case "delete" -> s(R.string.operation_delete);
+    case "download" -> s(R.string.operation_download);case "cleanup" -> s(R.string.operation_cleanup);
+    default -> op;
+  };}
+  private String countdown(long millis){long seconds=Math.max(0,(millis+999)/1000);return seconds==0?s(R.string.ui_connection_window_expired):s(R.string.connection_countdown,String.format(java.util.Locale.ROOT,"%d:%02d",seconds/60,seconds%60));}
+  private String connectionNotice(JSONObject result){
+    String reader=result.optString("reader","");
+    String explanation=s(reader.startsWith("telephony.")?R.string.connection_telephony_notice:reader.startsWith("hidl.")?R.string.connection_hidl_notice:R.string.connection_verified_notice);
+    return s(R.string.connection_route_notice,compatibility.optString("route",s(R.string.ui_no_verified_card_connection)),explanation);
+  }
+  private String readerDescription(String reader,String original){
+    if(!reader.startsWith("telephony."))return reader.isEmpty()?original:s(R.string.secure_reader,reader);
+    try{int[] slot=ReaderDescriptor.telephonyIndices(reader);String address=s(R.string.physical_slot,slot[0],slot[1]);
+      return original.startsWith("Removable eUICC")?s(R.string.removable_card,address):original.startsWith("Built-in eUICC")?s(R.string.built_in_card,address):address;
+    }catch(SecurityException invalid){return original;}
+  }
+  private void chooseLanguage(){
+    Sheet language=new Sheet(s(R.string.language_title));language.copy(s(R.string.language_help));
+    String[] tags={"","zh-Hans","en"};int[] labels={R.string.language_system,R.string.language_chinese,R.string.language_english};
+    for(int i=0;i<tags.length;i++){final String tag=tags[i];language.button(s(labels[i]),false,()->{language.dialog.dismiss();AppLanguage.select(this,tag);});}
+    language.button(s(R.string.ui_cancel),false,language.dialog::dismiss);language.show();
+  }
+  private String managementUnavailable() { return UiMessages.known(MainActivity.this,ManagementAvailability.reason(Build.VERSION.SDK_INT, Build.SUPPORTED_ABIS)); }
   private void connectDirect() {
     if(destroyed||!resumed||OPERATIONS.running()||backend!=null)return;
     IProfileService service=CompanionBinderProvider.management();
@@ -154,25 +185,25 @@ public final class MainActivity extends Activity {
       service.asBinder().linkToDeath(()->runOnUiThread(()->{
         if(backend!=service)return;
         backend=null;compatibility=new JSONObject();navigationSession++;clearDetailSelection();
-        statusPreservingOutcome("Connection lost", "Start the computer connection again. Pending operations will not be repeated.");render();
+        statusPreservingOutcome(s(R.string.ui_connection_lost), s(R.string.ui_start_the_computer_connection_again_pending_operations_will_not));render();
       }),0);
       backend=service;directManagement=true;companionManagement=true;fallback=false;
       if(bootstrapSheet!=null){bootstrapSheet.dismiss();bootstrapSheet=null;}
       if(screen==6)screen=0;
-      status("Connected", "Checking card and recovery state…");render();checkRecovery();
+      status(s(R.string.ui_connected), s(R.string.ui_checking_card_and_recovery_state));render();checkRecovery();
     }catch(Exception unavailable){backend=null;compatibility=new JSONObject();}
   }
   private void beginDirectBootstrap() {
-    if (!managementUnavailable().isEmpty()) { status("Device not supported by this build", managementUnavailable());return; }
-    if(OPERATIONS.running()){status("Operation in progress", "Wait for verification before changing connection.");return;}
+    if (!managementUnavailable().isEmpty()) { status(s(R.string.ui_device_not_supported_by_this_build), managementUnavailable());return; }
+    if(OPERATIONS.running()){status(s(R.string.ui_operation_in_progress), s(R.string.ui_wait_for_verification_before_changing_connection));return;}
     try {CompanionBinderProvider.beginManagementBootstrap();}
     catch(SecurityException active){backend=null;compatibility=new JSONObject();connectDirect();return;}
     backend=null;compatibility=new JSONObject();fallback=false;binderReadOnlyInventory=false;directManagement=true;companionManagement=true;
     navigationSession++;clearDetailSelection();
 
     try { connectionCommand=ConnectionCommand.forApk(getApplicationInfo().sourceDir); }
-    catch(IllegalArgumentException invalid){status("Command unavailable","Reinstall the verified APK before connecting.");render();return;}
-    connectionDeadline=android.os.SystemClock.elapsedRealtime()+120000;connectionExpired=false;connectionFeedback="";statusPreservingOutcome("Waiting for computer","Copy the command below and run it within two minutes.");screen=6;render();
+    catch(IllegalArgumentException invalid){status(s(R.string.ui_command_unavailable),s(R.string.ui_reinstall_the_verified_apk_before_connecting));render();return;}
+    connectionDeadline=android.os.SystemClock.elapsedRealtime()+120000;connectionExpired=false;connectionFeedback="";statusPreservingOutcome(s(R.string.ui_waiting_for_computer),s(R.string.ui_copy_the_command_below_and_run_it_within_two_minutes));screen=6;render();
   }
 
   private boolean useCompanion() {
@@ -184,9 +215,9 @@ public final class MainActivity extends Activity {
     connectDirect();
   }
   private void connect() {
-    if (!managementUnavailable().isEmpty()) { status("Device not supported by this build",managementUnavailable());return; }
+    if (!managementUnavailable().isEmpty()) { status(s(R.string.ui_device_not_supported_by_this_build),managementUnavailable());return; }
     connectExistingCompanion();
-    if(backend==null)status("Connect your card","Choose Connect using computer and copy and run its ADB command.");
+    if(backend==null)status(s(R.string.ui_connect_your_card),s(R.string.ui_choose_connect_using_computer_and_copy_and_run_its_adb_command));
   }
   private interface Job {
     JSONObject run() throws Exception;
@@ -199,7 +230,7 @@ public final class MainActivity extends Activity {
       return;
     final long taskNavigation = navigationSession;
     final long taskDraft = draft.revision();
-    final boolean contextual = label.equals("Reading QR image") || label.equals("Validating activation code") || label.startsWith("Reviewing ");
+    final boolean contextual = label.equals(s(R.string.ui_reading_qr_image)) || label.equals(s(R.string.ui_validating_activation_code)) || label.startsWith(s(R.string.ui_reviewing));
     final long ticket = OPERATIONS.begin(label, mutation);
     if (ticket == 0)
       return;
@@ -207,8 +238,8 @@ public final class MainActivity extends Activity {
       getPreferences(0).edit().putBoolean("pending", true).commit();
     statusPreservingOutcome(label,
         mutation
-            ? "One attempt in progress. Keep the phone powered on; the result will be verified."
-            : label.equals("Reading QR image") ? "Decoding the image on this phone. No card changes." : "Reading and checking your card. No changes are being made.");
+            ? s(R.string.ui_one_attempt_in_progress_keep_the_phone_powered_on_the_result_wil)
+            : label.equals(s(R.string.ui_reading_qr_image)) ? s(R.string.ui_decoding_the_image_on_this_phone_no_card_changes) : s(R.string.ui_reading_and_checking_your_card_no_changes_are_being_made));
     WORK.execute(() -> {
       JSONObject value = null;
       boolean failed = false;
@@ -228,23 +259,22 @@ public final class MainActivity extends Activity {
         if (error) {
           if (contextual && (navigationSession != taskNavigation || (screen == 1 && !draft.isCurrent(taskDraft)))) return;
           String message = mutation
-              ? "Result unknown. Reconnect and verify the card. Do not retry automatically."
-              : label.equals("Reading QR image")
-              ? "No readable QR code was found. Choose a clear image or enter the activation code "
-                  + "manually."
-              : "Could not complete the check. Reconnect and try a read-only refresh.";
+              ? s(R.string.ui_result_unknown_reconnect_and_verify_the_card_do_not_retry_automa)
+              : label.equals(s(R.string.ui_reading_qr_image))
+              ? s(R.string.ui_no_readable_qr_code_was_found_choose_a_clear_image_or_enter_the)
+              : s(R.string.ui_could_not_complete_the_check_reconnect_and_try_a_read_only_refre);
           if (mutation)
             notice = message;
-          status(mutation ? "Needs verification" : "Check unavailable", message);
+          status(mutation ? s(R.string.ui_needs_verification) : s(R.string.ui_check_unavailable), message);
           render();
           return;
         }
         try {
           if (!mutation)
-            statusPreservingOutcome("Check complete", "No changes were made.");
+            statusPreservingOutcome(s(R.string.ui_check_complete), s(R.string.ui_no_changes_were_made));
           done.accept(result);
         } catch (Exception e) {
-          notice = "The response could not be verified. Read the card again before continuing.";
+          notice = s(R.string.ui_the_response_could_not_be_verified_read_the_card_again_before_co);
           render();
         }
       });
@@ -252,7 +282,7 @@ public final class MainActivity extends Activity {
   }
   private void probeFallback() {
     if (!LabSupport.socketEligible()) return;
-    run("Checking companion", false,
+    run(s(R.string.ui_checking_companion), false,
         () -> {
           try { ShellCompanionClient.status(); }
           catch (Exception noSocket) {
@@ -278,7 +308,7 @@ public final class MainActivity extends Activity {
               ? ShellCompanionClient.service("listProfiles",null,null,null,null,null)
               : ShellCompanionClient.list();
           if (!profiles.optBoolean("ok", true) || !profiles.has("profiles"))
-            throw new IllegalStateException("Companion inventory not verified");
+            throw new IllegalStateException(s(R.string.ui_companion_inventory_not_verified));
           // A bounded one-time read-only diagnostics workflow provides a
           // real management PREPARE test even when accessibility UI is
           // unavailable. It never calls execute, and intentionally discards
@@ -299,8 +329,8 @@ public final class MainActivity extends Activity {
         r -> {
           if (r.optBoolean("transportUnavailable", false)) {
             // A missing legacy socket must not change connection modes or replay an operation.
-            status("Companion unavailable",
-                "Use Connect using computer and copy and run the ADB command shown in the app.");
+            status(s(R.string.ui_companion_unavailable),
+                s(R.string.ui_use_connect_using_computer_and_copy_and_run_the_adb_command_show));
             return;
           }
           fallback = true;
@@ -308,14 +338,14 @@ public final class MainActivity extends Activity {
           backend = companionManagement ? new CompanionProfileBackend() : null;
           inventory = r.getJSONObject("inventory");
           needsConnectionRead = companionManagement;
-          status("Card connected", companionManagement
-              ? "Computer connection ready. Reconnect after a reboot or app update."
-              : "Legacy companion is read-only. Use Connect using computer for management.");
+          status(s(R.string.ui_card_connected), companionManagement
+              ? s(R.string.ui_computer_connection_ready_reconnect_after_a_reboot_or_app_update)
+              : s(R.string.ui_legacy_companion_is_read_only_use_connect_using_computer_for_man));
           render();
         });
   }
   private void selectLegacyCompanion() {
-    if(OPERATIONS.running()){status("Operation in progress","Wait for verification before changing connection.");return;}
+    if(OPERATIONS.running()){status(s(R.string.ui_operation_in_progress),s(R.string.ui_wait_for_verification_before_changing_connection));return;}
     if(!LabSupport.socketEligible())return;
     directManagement=false;backend=null;compatibility=new JSONObject();fallback=false;companionManagement=false;
     binderReadOnlyInventory=false;inventory=new JSONObject();probeFallback();
@@ -323,22 +353,22 @@ public final class MainActivity extends Activity {
   private void refresh() {
     final IProfileService s = backend;
     if (s == null && binderReadOnlyInventory) {
-      status("Read-only inventory", "Single-use Binder read complete. Reconnect the service before another independent read.");
+      status(s(R.string.ui_read_only_inventory), s(R.string.ui_single_use_binder_read_complete_reconnect_the_service_before_ano));
       return;
     }
     if (s == null && !fallback) {
       connect();
       return;
     }
-    run("Reading your eSIMs", false,
+    run(s(R.string.ui_reading_your_esims), false,
         () -> s != null ? new JSONObject(s.listProfiles()) : ShellCompanionClient.list(), r -> {
           compatibility=r.optJSONObject("compatibility")==null?new JSONObject():r.optJSONObject("compatibility");
           if (!r.optBoolean("ok", true)) {
             inventory=new JSONObject();notificationCleanupAvailable=false;clearDetailSelection();
-            String limitation=SecureElementFailure.message(r.optString("capabilityError", ""));
-            status("Card unavailable", (limitation.isEmpty()
-                ? "No verified inventory was returned. Reconnect and refresh." : limitation)+
-                  (compatibility.length()>0?" Open Compatibility check for the result of each channel.":""));
+            String limitation=UiMessages.known(MainActivity.this,SecureElementFailure.message(r.optString("capabilityError", "")));
+            status(s(R.string.ui_card_unavailable), (limitation.isEmpty()
+                ? s(R.string.ui_no_verified_inventory_was_returned_reconnect_and_refresh) : limitation)+
+                  (compatibility.length()>0?s(R.string.ui_open_compatibility_check_for_the_result_of_each_channel):""));
             render();return;
           }
           inventory = r;
@@ -350,7 +380,7 @@ public final class MainActivity extends Activity {
             restoreDetailAfterRead=false;
           }
           statusPreservingOutcome(
-              "Card connected", r.optString("connectionNotice", "Enabled on card does not confirm cellular network registration."));
+              s(R.string.ui_card_connected), connectionNotice(r));
           render();
         });
   }
@@ -358,33 +388,33 @@ public final class MainActivity extends Activity {
     final IProfileService s = backend;
     if (s == null)
       return;
-    run("Checking recovery", false, () -> new JSONObject(s.getOperationStatus()), r -> {
+    run(s(R.string.ui_checking_recovery), false, () -> new JSONObject(s.getOperationStatus()), r -> {
       if (!r.optBoolean("ok", false)) {
         if(RecoveryUiPolicy.needsCardChoice(r.optString("capabilityError",""))){
           inventory=new JSONObject();notificationCleanupAvailable=false;clearDetailSelection();
-          statusPreservingOutcome("Choose a card","More than one eUICC is readable. Select the card you want to manage.");render();return;
+          statusPreservingOutcome(s(R.string.ui_choose_a_card),s(R.string.ui_more_than_one_euicc_is_readable_select_the_card_you_want_to_mana));render();return;
         }
         getPreferences(0).edit().putBoolean("pending", true).commit();
         inventory = new JSONObject();notificationCleanupAvailable = false;clearDetailSelection();
-        String limitation=SecureElementFailure.message(r.optString("capabilityError", ""));
-        status("Recovery state unavailable", limitation.isEmpty()
-            ? "Changes are blocked until the safety record can be checked. Do not clear app data or repeat the previous operation."
-            : limitation+" Changes remain blocked until card and recovery verification can complete.");
+        String limitation=UiMessages.known(MainActivity.this,SecureElementFailure.message(r.optString("capabilityError", "")));
+        status(s(R.string.ui_recovery_state_unavailable), limitation.isEmpty()
+            ? s(R.string.ui_changes_are_blocked_until_the_safety_record_can_be_checked_do_no)
+            : limitation+s(R.string.ui_changes_remain_blocked_until_card_and_recovery_verification_can));
         render();return;
       }
-      String priorNotificationMessage = NotificationPresentation.message(notificationStatus);
+      String priorNotificationMessage = UiMessages.known(MainActivity.this,NotificationPresentation.message(notificationStatus));
       notificationStatus = r.optString("notificationStatus", "");
       if ("none".equals(notificationStatus)) notificationStatus = "";
-      if (notice.equals(priorNotificationMessage)) notice = notificationStatus.isEmpty() ? "" : NotificationPresentation.message(notificationStatus);
+      if (notice.equals(priorNotificationMessage)) notice = notificationStatus.isEmpty() ? "" : UiMessages.known(MainActivity.this,NotificationPresentation.message(notificationStatus));
       notificationCleanupAvailable = r.optBoolean("notificationCleanupAvailable", false);
       String phase = r.optString("status", r.optString("stage", "unknown"));
       boolean recoveryBlocked = RecoveryUiPolicy.blocks(true, r.optBoolean("requiresReconciliation", true), r.optBoolean("reviewRequired", true), phase);
       if (recoveryBlocked) getPreferences(0).edit().putBoolean("pending", true).commit();
       if (recoveryBlocked || getPreferences(0).getBoolean("pending", false))
-        notice = "Recovery check: " + safeState(phase)
-            + ". Use Verify card and recovery before making more changes.";
+        notice = s(R.string.ui_recovery_check) + safeState(phase)
+            + s(R.string.ui_use_verify_card_and_recovery_before_making_more_changes);
       if (r.optBoolean("notificationReviewRequired", false))
-        notice += (notice.isEmpty() ? "" : "\n") + NotificationPresentation.message(notificationStatus);
+        notice += (notice.isEmpty() ? "" : "\n") + UiMessages.known(MainActivity.this,NotificationPresentation.message(notificationStatus));
       refresh();
     });
   }
@@ -394,13 +424,12 @@ public final class MainActivity extends Activity {
       connect();
       return;
     }
-    run("Verifying card and recovery", false, () -> new JSONObject(s.reconcileOperation()), r -> {
+    run(s(R.string.ui_verifying_card_and_recovery), false, () -> new JSONObject(s.reconcileOperation()), r -> {
       boolean review = RecoveryUiPolicy.blocks(r.optBoolean("ok", false), r.optBoolean("requiresReconciliation", false), r.optBoolean("reviewRequired", true), r.optString("status", "unknown"));
-      notice = review ? "Card read completed; the previous operation still requires review. Do not "
-              + "repeat a download or destructive action."
+      notice = review ? s(R.string.ui_card_read_completed_the_previous_operation_still_requires_review)
                       : "reviewed_abandoned".equals(r.optString("status"))
-                          ? "The unknown download was reviewed and abandoned. The profile inventory is unchanged. Its activation code may have been consumed; do not reuse it. New operations are available."
-                          : "Read-only reconciliation completed. Check the current profile inventory.";
+                          ? s(R.string.ui_the_unknown_download_was_reviewed_and_abandoned_the_profile_inve)
+                          : s(R.string.ui_read_only_reconciliation_completed_check_the_current_profile_inv);
       if (!review)
         getPreferences(0).edit().remove("pending").commit();
       refresh();
@@ -412,7 +441,7 @@ public final class MainActivity extends Activity {
       return;
     final long previewSession = navigationSession;
     final JSONObject previewInventory = inventory;
-    run("Reviewing " + op, false,
+    run(s(R.string.ui_reviewing) + operationLabel(op), false,
         ()
             -> new JSONObject(op.equals("switch") ? s.prepareSwitch(index)
                     : op.equals("rename")         ? s.prepareRename(index, nickname)
@@ -421,44 +450,43 @@ public final class MainActivity extends Activity {
         r -> {
           if (previewSession != navigationSession || inventory != previewInventory || backend != s) return;
           if (!r.optBoolean("ok", true)) {
-            notice = "The card safety policy did not allow this action. Refresh the inventory and "
-                + "review recovery.";
+            notice = s(R.string.ui_the_card_safety_policy_did_not_allow_this_action_refresh_the_inv);
             render();
             return;
           }
           if (!r.optBoolean("writeQualified", false)) {
-            notice = "Management is unavailable for this card identity or local test scope. Reconnect and refresh.";
+            notice = s(R.string.ui_management_is_unavailable_for_this_card_identity_or_local_test_s);
             render();
             return;
           }
           String token = r.optString("token", "");
           if (token.isEmpty()) {
-            notice = "No valid confirmation token was returned.";
+            notice = s(R.string.ui_no_valid_confirmation_token_was_returned);
             render();
             return;
           }
           if (ProfileActionPolicy.executesDirectly(op)) {
             execute(s,token,op);return;
           }
-          String warning = "This permanently removes the selected profile from this card. Its activation code may not work again.";
-          status("Review deletion", "Check the selected card and profile before deleting.");
+          String warning = s(R.string.ui_this_permanently_removes_the_selected_profile_from_this_card_its);
+          status(s(R.string.ui_review_deletion), s(R.string.ui_check_the_selected_card_and_profile_before_deleting));
           final boolean[] confirmed = {false};
-          Sheet preview = new Sheet(op.equals("switch") ? "Activate eSIM?" : op.equals("delete") ? "Delete eSIM?" : op.equals("disable") ? "Disable eSIM?" : "Save nickname?");
-          if (op.equals("switch")) preview.fact("Currently enabled", r.optString("from", "").isEmpty() ? "None on this card" : r.optString("from"));
-          preview.fact("Selected eSIM", r.optString("to", "Selected eSIM"));preview.copy(warning);
-          preview.button(op.equals("delete") ? "Delete permanently" : op.equals("switch") ? "Activate once" : op.equals("disable") ? "Disable once" : "Save nickname", true, () -> {
+          Sheet preview = new Sheet(op.equals("switch") ? s(R.string.ui_activate_esim) : op.equals("delete") ? s(R.string.ui_delete_esim) : op.equals("disable") ? s(R.string.ui_disable_esim) : s(R.string.ui_save_nickname));
+          if (op.equals("switch")) preview.fact(s(R.string.ui_currently_enabled), r.optString("from", "").isEmpty() ? s(R.string.ui_none_on_this_card) : r.optString("from"));
+          preview.fact(s(R.string.ui_selected_esim), r.optString("to", s(R.string.ui_selected_esim)));preview.copy(warning);
+          preview.button(op.equals("delete") ? s(R.string.ui_delete_permanently) : op.equals("switch") ? s(R.string.ui_activate_once) : op.equals("disable") ? s(R.string.ui_disable_once) : s(R.string.ui_save_nickname_79), true, () -> {
             confirmed[0] = true;preview.dialog.dismiss();execute(s, token, op);
           });
-          preview.button("Cancel", false, preview.dialog::dismiss);
-          preview.dialog.setOnDismissListener(d -> { if (!confirmed[0]) status("Review cancelled", "No changes were made."); });preview.show();
+          preview.button(s(R.string.ui_cancel), false, preview.dialog::dismiss);
+          preview.dialog.setOnDismissListener(d -> { if (!confirmed[0]) status(s(R.string.ui_review_cancelled), s(R.string.ui_no_changes_were_made)); });preview.show();
         });
   }
   private void execute(IProfileService s, String token, String op) {
     if (backend != s) {
-      status("Connection changed", "No action submitted. Reconnect and prepare a new preview.");
+      status(s(R.string.ui_connection_changed), s(R.string.ui_no_action_submitted_reconnect_and_prepare_a_new_preview));
       return;
     }
-    run(op.equals("download") ? "Installing and verifying" : "Applying " + op, true,
+    run(op.equals("download") ? s(R.string.ui_installing_and_verifying) : s(R.string.ui_applying) + operationLabel(op), true,
         ()
             -> new JSONObject(op.equals("switch") ? s.executeSwitch(token)
                     : op.equals("download")       ? s.executeDownload(token)
@@ -482,29 +510,27 @@ public final class MainActivity extends Activity {
           }
           notice = verified && !review
               ? (op.equals("download")
-                        ? "eSIM installed and independently verified. It remains disabled; your "
-                            + "active eSIM is unchanged."
-                        : "Operation verified by a fresh card read. Review the updated inventory.")
-              : "Operation requires review. Verify the card before any further action; no "
-                  + "automatic retry was made.";
+                        ? s(R.string.ui_esim_installed_and_independently_verified_it_remains_disabled_yo)
+                        : s(R.string.ui_operation_verified_by_a_fresh_card_read_review_the_updated_inven))
+              : s(R.string.ui_operation_requires_review_verify_the_card_before_any_further_act);
           if (op.equals("switch") && verified && !review) {
             String system = r.optString("systemSubscriptionStatus", "unavailable");
-            notice = "eSIM enabled and verified on the card. "
+            notice = s(R.string.ui_esim_enabled_and_verified_on_the_card)
                 + ("matched".equals(system)
-                    ? "Android reports the selected eSIM as an active subscription. Network service is not verified."
+                    ? s(R.string.ui_android_reports_the_selected_esim_as_an_active_subscription_netw)
                     : "mismatch".equals(system)
-                    ? "Android has not confirmed the selected subscription yet. Check SIM settings before switching again."
-                    : "Android subscription status could not be checked. Check SIM settings; network service is not verified.");
+                    ? s(R.string.ui_android_has_not_confirmed_the_selected_subscription_yet_check_si)
+                    : s(R.string.ui_android_subscription_status_could_not_be_checked_check_sim_setti));
           }
           if (r.has("notificationStatus") && verified && !review)
-            notice += "\n" + NotificationPresentation.message(notificationStatus);
+            notice += "\n" + UiMessages.known(MainActivity.this,NotificationPresentation.message(notificationStatus));
           if (verified && !review)
             getPreferences(0).edit().remove("pending").commit();
           if (r.optBoolean("restartRequired", false) || !r.optBoolean("notificationWorkerStopped", true)) {
             getPreferences(0).edit().putBoolean("pending", true).commit();
-            notice += "\nReconnect the local service using your computer and verify the card before another operation.";
+            notice += s(R.string.ui_reconnect_the_local_service_using_your_computer_and_verify_the_c);
           }
-          recentResults.add(0, (verified && !review ? "Verified: " : "Needs review: ") + op);
+          recentResults.add(0, (verified && !review ? s(R.string.ui_verified) : s(R.string.ui_needs_review)) + operationLabel(op));
           if(recentResults.size()>20)recentResults.remove(20);
           restoreDetailAfterRead=verified && !review && ProfileActionPolicy.executesDirectly(op);
           screen = restoreDetailAfterRead ? 3 : 0;
@@ -515,73 +541,72 @@ public final class MainActivity extends Activity {
   }
   private void showInstalledResult() {
     if (destroyed || !resumed) return;
-    Sheet result = new Sheet("eSIM installed");installResultDialog = result.dialog;
-    result.copy("Installation was independently verified on your card.");
-    result.fact("New eSIM", "Disabled — ready to activate later");
-    result.fact("Existing profiles", "Unchanged");
-    result.fact("Operator notification", NotificationPresentation.message(notificationStatus));
+    Sheet result = new Sheet(s(R.string.ui_esim_installed));installResultDialog = result.dialog;
+    result.copy(s(R.string.ui_installation_was_independently_verified_on_your_card));
+    result.fact(s(R.string.ui_new_esim), s(R.string.ui_disabled_ready_to_activate_later));
+    result.fact(s(R.string.ui_existing_profiles), s(R.string.ui_unchanged));
+    result.fact(s(R.string.ui_operator_notification), UiMessages.known(MainActivity.this,NotificationPresentation.message(notificationStatus)));
     result.dialog.setCancelable(false);result.dialog.setCanceledOnTouchOutside(false);
-    result.button("Done", true, () -> { result.dialog.dismiss();screen = 0;render(); });result.show();
+    result.button(s(R.string.ui_done), true, () -> { result.dialog.dismiss();screen = 0;render(); });result.show();
   }
   private void reviewDownload() {
     if (backend == null) {
-      status("Connect your card first",
-          "Installation requires the authorized on-phone management service.");
+      status(s(R.string.ui_connect_your_card_first),
+          s(R.string.ui_installation_requires_the_authorized_on_phone_management_service));
       return;
     }
     final IProfileService s = backend;
     String code = activation.getText().toString().trim(), cc = confirmation.getText().toString();
     if (code.isEmpty()) {
-      activation.setError("Enter an LPA activation code or scan a QR code");
+      activation.setError(s(R.string.ui_enter_an_lpa_activation_code_or_scan_a_qr_code));
       return;
     }
     final ActivationCode parsed;
     try {
       parsed = ActivationCode.parse(code);
       if (parsed.confirmationRequired && cc.isEmpty()) {
-        showConfirmation = true;render();confirmation.setError("Your operator requires a confirmation code");confirmation.requestFocus();return;
+        showConfirmation = true;render();confirmation.setError(s(R.string.ui_your_operator_requires_a_confirmation_code));confirmation.requestFocus();return;
       }
       parsed.confirmation(cc);
     } catch (IllegalArgumentException invalid) {
-      activation.setError(invalid.getMessage());
+      activation.setError(UiMessages.known(MainActivity.this,invalid.getMessage()));
       return;
     }
     final long reviewedSession = draft.revision();
-    run("Validating activation code", false,
+    run(s(R.string.ui_validating_activation_code), false,
         () -> {
           JSONObject target = new JSONObject(s.getCardInfo());
-          if (!target.optBoolean("ok", false)) throw new IllegalStateException("Card verification unavailable");
-          return new JSONObject(s.prepareDownload(code, cc)).put("targetCard", target.optString("eidMasked", "Not reported"));
+          if (!target.optBoolean("ok", false)) throw new IllegalStateException(s(R.string.ui_card_verification_unavailable));
+          return new JSONObject(s.prepareDownload(code, cc)).put("targetCard", target.optString("eidMasked", s(R.string.ui_not_reported)));
         }, r -> {
           if (screen != 1 || !draft.isCurrent(reviewedSession) || backend != s) return;
           if (!r.optBoolean("ok", true)) {
-            notice = "Activation code could not be accepted. Check the code, confirmation code, "
-                + "connection, and card safety status.";
+            notice = s(R.string.ui_activation_code_could_not_be_accepted_check_the_code_confirmatio);
             render();
             return;
           }
           if (!r.optBoolean("writeQualified", false)) {
-            notice = "Activation code reviewed. This card is read-only, so installation is unavailable. No download started.";
+            notice = s(R.string.ui_activation_code_reviewed_this_card_is_read_only_so_installation);
             render();
             return;
           }
           String token = r.optString("token", "");
           if (token.isEmpty()) {
-            status("Review unavailable", "No installation token was returned.");
+            status(s(R.string.ui_review_unavailable), s(R.string.ui_no_installation_token_was_returned));
             return;
           }
           status(
-              "Installation review ready", "No changes made. Confirm once to install, or cancel.");
+              s(R.string.ui_installation_review_ready), s(R.string.ui_no_changes_made_confirm_once_to_install_or_cancel));
           final boolean[] confirmed = {false};
-          Sheet preview = new Sheet("Install this eSIM?");
-          preview.fact("Operator", parsed.host);preview.fact("Card", r.optString("targetCard", "Verified connected card"));
-          preview.copy("The new eSIM stays disabled. Existing profiles keep their current state.");
-          preview.copy("The operator may consume this code. Installation is attempted once, then independently checked. Keep another internet connection available.");
-          preview.button("Install once", true, () -> {
+          Sheet preview = new Sheet(s(R.string.ui_install_this_esim));
+          preview.fact(s(R.string.ui_operator), parsed.host);preview.fact(s(R.string.ui_card), r.optString("targetCard", s(R.string.ui_verified_connected_card)));
+          preview.copy(s(R.string.ui_the_new_esim_stays_disabled_existing_profiles_keep_their_current));
+          preview.copy(s(R.string.ui_the_operator_may_consume_this_code_installation_is_attempted_onc));
+          preview.button(s(R.string.ui_install_once), true, () -> {
             confirmed[0] = true;preview.dialog.dismiss();clearCredentials();execute(s, token, "download");
           });
-          preview.button("Cancel", false, preview.dialog::dismiss);
-          preview.dialog.setOnDismissListener(d -> { if (!confirmed[0]) status("Installation cancelled", "No download started. No changes were made."); });preview.show();
+          preview.button(s(R.string.ui_cancel), false, preview.dialog::dismiss);
+          preview.dialog.setOnDismissListener(d -> { if (!confirmed[0]) status(s(R.string.ui_installation_cancelled), s(R.string.ui_no_download_started_no_changes_were_made)); });preview.show();
         });
   }
   private void clearCredentials() {
@@ -594,7 +619,7 @@ public final class MainActivity extends Activity {
     if (screen == 1 && destination != 1) { clearCredentials();pendingImport = null;draft.changed(); }
     navigationSession++;
     if (destination != 1) { draft.form = false;showConfirmation = false; }
-    if (!getPreferences(0).getBoolean("pending", false)) { notice = "";title = backend != null ? "Card connected" : "Connect your card";detail = backend != null ? "" : "Connect using your computer."; }
+    if (!getPreferences(0).getBoolean("pending", false)) { notice = "";title = backend != null ? s(R.string.ui_card_connected) : s(R.string.ui_connect_your_card);detail = backend != null ? "" : s(R.string.ui_connect_using_your_computer); }
     selectedProfile=-1;selectedIccid="";selectedProfileKey="";detailProfile=null;
     screen = destination;
     render();
@@ -626,8 +651,8 @@ public final class MainActivity extends Activity {
     root.setBackgroundColor(BG);
     PageHeader.applyInsets(root);
     root.addView(new PageHeader(this,
-        screen == 0 ? "8bercue" : screen == 1 ? "Add eSIM" : screen == 3 ? "eSIM details" : screen == 4 ? "Rename eSIM" : screen == 5 ? "Operation records" : screen == 6 ? "Connect your phone" : "Settings",
-        screen == 1 && draft.form ? "Back to add methods" : "Back to My eSIMs",
+        screen == 0 ? "8bercue" : screen == 1 ? s(R.string.ui_add_esim) : screen == 3 ? s(R.string.ui_esim_details) : screen == 4 ? s(R.string.ui_rename_esim) : screen == 5 ? s(R.string.ui_operation_records) : screen == 6 ? s(R.string.ui_connect_your_phone) : s(R.string.ui_settings),
+        screen == 1 && draft.form ? s(R.string.ui_back_to_add_methods) : s(R.string.ui_back_to_my_esims),
         screen == 0 ? null : this::handleBack,
         screen == 0 ? () -> navigate(2) : null));
     ScrollView scroll = new ScrollView(this);
@@ -640,7 +665,7 @@ public final class MainActivity extends Activity {
     workspace.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
     root.addView(workspace,new LinearLayout.LayoutParams(-1,0,1));
     if(screen==0&&inventory.has("profiles")&&!binderReadOnlyInventory){
-      Button fab=action("+  Add eSIM",false,()->navigate(1));fab.setTextColor(ON_TONAL);fab.setBackground(rounded(TONAL,16));fab.setElevation(dp(2));
+      Button fab=action(s(R.string.ui_add_esim_134),false,()->navigate(1));fab.setTextColor(ON_TONAL);fab.setBackground(rounded(TONAL,16));fab.setElevation(dp(2));
       FrameLayout.LayoutParams placement=new FrameLayout.LayoutParams(-2,dp(56),Gravity.BOTTOM|Gravity.END);placement.setMargins(dp(24),dp(16),dp(24),dp(16));workspace.addView(fab,placement);availability(fab,!getPreferences(0).getBoolean("pending",false));
       content.setPadding(dp(24),0,dp(24),dp(100));
     }
@@ -672,85 +697,85 @@ public final class MainActivity extends Activity {
   }
   private void home() {
     if (!managementUnavailable().isEmpty()) {
-      add(text("Installation supported; management unavailable",20,TEXT,true),24);
+      add(text(s(R.string.ui_installation_supported_management_unavailable),20,TEXT,true),24);
       add(text(managementUnavailable()),12);return;
     }
     LinearLayout card=box();
-    Button choice=button(cardLabel()+" · Choose",false);
+    Button choice=button(cardLabel()+s(R.string.ui_choose),false);
     choice.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
     choice.setTextSize(18);choice.setTextColor(TEXT);
     choice.setBackgroundColor(Color.TRANSPARENT);
     choice.setOnClickListener(v->{if(backend!=null)chooseCard();else beginDirectBootstrap();});
     taskControls.add(choice);card.addView(choice,new LinearLayout.LayoutParams(-1,-2));
-    card.addView(text("EID "+inventory.optString("eidMasked","Not checked"),12,MUTED,false),margin(4));
-    card.addView(text(inventory.has("profiles")?"Card connected · Read verified":"Connect to check this card",12,MUTED,false),margin(14));
+    card.addView(text(s(R.string.ui_eid)+inventory.optString("eidMasked",s(R.string.ui_not_checked)),12,MUTED,false),margin(4));
+    card.addView(text(inventory.has("profiles")?s(R.string.ui_card_connected_read_verified):s(R.string.ui_connect_to_check_this_card),12,MUTED,false),margin(14));
     add(card,18);
     LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
-    heading.addView(text("Your eSIMs",22,TEXT,false),new LinearLayout.LayoutParams(0,-2,1));
-    Button refresh=action("Refresh",false,this::refresh);refresh.setTextSize(13);refresh.setBackgroundColor(Color.TRANSPARENT);
+    heading.addView(text(s(R.string.ui_your_esims),22,TEXT,false),new LinearLayout.LayoutParams(0,-2,1));
+    Button refresh=action(s(R.string.ui_refresh),false,this::refresh);refresh.setTextSize(13);refresh.setBackgroundColor(Color.TRANSPARENT);
     heading.addView(refresh,new LinearLayout.LayoutParams(dp(88),dp(48)));add(heading,22);
     JSONArray profiles=inventory.optJSONArray("profiles");
-    if(profiles==null){add(text(backend==null?"Your eSIMs will appear here.":"Choose a card or check compatibility in Settings."),16);add(action(backend==null?"Connect using computer":"Choose card",true,backend==null?this::beginDirectBootstrap:this::chooseCard),20);return;}
+    if(profiles==null){add(text(backend==null?s(R.string.ui_your_esims_will_appear_here):s(R.string.ui_choose_a_card_or_check_compatibility_in_settings)),16);add(action(backend==null?s(R.string.ui_connect_using_computer):s(R.string.ui_choose_card),true,backend==null?this::beginDirectBootstrap:this::chooseCard),20);return;}
     for(int i=0;i<profiles.length();i++){
       final int index=i;JSONObject profile=profiles.optJSONObject(i);if(profile==null)continue;
       LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setMinimumHeight(dp(96));row.setPadding(0,dp(16),0,dp(16));
       TextView avatar=text(profileName(profile).substring(0,Math.min(2,profileName(profile).length())),16,ON_TONAL,true);avatar.setGravity(Gravity.CENTER);avatar.setBackground(rounded(TONAL,14));row.addView(avatar,new LinearLayout.LayoutParams(dp(44),dp(44)));
       LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);labels.setPadding(dp(14),0,dp(8),0);
-      labels.addView(text(profileName(profile),16,TEXT,true));labels.addView(text(profile.optString("iccidMasked","Not reported"),12,MUTED,false),margin(4));row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
-      boolean on="enabled".equalsIgnoreCase(profile.optString("state"));TextView state=text(on?"Enabled":"disabled".equalsIgnoreCase(profile.optString("state"))?"Disabled":"Unknown",11,on?ACCENT:MUTED,false);state.setPadding(dp(8),dp(4),dp(8),dp(4));state.setBackground(rounded(SURFACE,8));row.addView(state);
-      row.setContentDescription(profileName(profile)+", "+state.getText()+". View profile details");row.setFocusable(true);ripple(row);row.setOnClickListener(v->{if(!OPERATIONS.running())showProfile(index,profile,row);});taskControls.add(row);add(row,0);addDivider();
+      labels.addView(text(profileName(profile),16,TEXT,true));labels.addView(text(profile.optString("iccidMasked",s(R.string.ui_not_reported)),12,MUTED,false),margin(4));row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+      boolean on="enabled".equalsIgnoreCase(profile.optString("state"));TextView state=text(on?s(R.string.ui_enabled):"disabled".equalsIgnoreCase(profile.optString("state"))?s(R.string.ui_disabled):s(R.string.ui_unknown),11,on?ACCENT:MUTED,false);state.setPadding(dp(8),dp(4),dp(8),dp(4));state.setBackground(rounded(SURFACE,8));row.addView(state);
+      row.setContentDescription(s(R.string.profile_accessibility,profileName(profile),state.getText()));row.setFocusable(true);ripple(row);row.setOnClickListener(v->{if(!OPERATIONS.running())showProfile(index,profile,row);});taskControls.add(row);add(row,0);addDivider();
     }
-    if(profiles.length()==0)add(text("No profiles yet. Add an eSIM to get started."),20);
-    add(text("Enabled describes the card state. Network service has not been checked.",12,MUTED,false),20);
+    if(profiles.length()==0)add(text(s(R.string.ui_no_profiles_yet_add_an_esim_to_get_started)),20);
+    add(text(s(R.string.ui_enabled_describes_the_card_state_network_service_has_not_been_ch),12,MUTED,false),20);
 
   }
-  private String cardLabel(){String reader=inventory.optString("reader","");String description=inventory.optString("description","");return description.isEmpty()?(reader.isEmpty()?"Select an eUICC":reader+" · eUICC"):description;}
+  private String cardLabel(){String reader=inventory.optString("reader","");String description=inventory.optString("description","");return description.isEmpty()?(reader.isEmpty()?s(R.string.ui_select_an_euicc):reader+s(R.string.ui_euicc)):readerDescription(reader,description);}
   private void selectDetail(int index,JSONObject profile){selectedProfile=index;selectedIccid=profile.optString("iccidMasked","");selectedProfileKey=profile.optString("selectionId","");detailProfile=profile;detailSelection.open(inventory,backend,profile,index);screen=3;navigationSession++;render();}
   private boolean detailCurrent(){JSONArray rows=inventory.optJSONArray("profiles");return backend!=null&&resumed&&!destroyed&&!OPERATIONS.running()&&rows!=null&&selectedProfile>=0&&rows.optJSONObject(selectedProfile)==detailProfile&&detailSelection.matches(inventory,backend,detailProfile,selectedProfile)&&!getPreferences(0).getBoolean("pending",false)&&!selectedIccid.isEmpty()&&!selectedProfileKey.isEmpty();}
   private void profileDetails(){
-    JSONObject p=detailProfile;if(p==null){add(text("Refresh the card and select a profile."),24);return;}
-    add(text(cardLabel()+" · EID "+inventory.optString("eidMasked","Not reported"),12,MUTED,false),16);
+    JSONObject p=detailProfile;if(p==null){add(text(s(R.string.ui_refresh_the_card_and_select_a_profile)),24);return;}
+    add(text(cardLabel()+s(R.string.ui_eid_156)+inventory.optString("eidMasked",s(R.string.ui_not_reported)),12,MUTED,false),16);
     add(text(profileName(p),28,TEXT,false),28);add(text(selectedIccid),6);
     boolean enabled="enabled".equalsIgnoreCase(p.optString("state"));boolean disabled="disabled".equalsIgnoreCase(p.optString("state"));
-    Switch toggle=new Switch(this);toggle.setText("Use this eSIM");toggle.setTextSize(20);toggle.setTextColor(ON_TONAL);toggle.setPadding(dp(20),dp(18),dp(20),dp(18));toggle.setMinHeight(dp(80));toggle.setBackground(rounded(TONAL,24));toggle.setChecked(enabled);toggle.setContentDescription("Use this eSIM");
+    Switch toggle=new Switch(this);toggle.setText(s(R.string.ui_use_this_esim));toggle.setTextSize(20);toggle.setTextColor(ON_TONAL);toggle.setPadding(dp(20),dp(18),dp(20),dp(18));toggle.setMinHeight(dp(80));toggle.setBackground(rounded(TONAL,24));toggle.setChecked(enabled);toggle.setContentDescription(s(R.string.ui_use_this_esim));
     toggle.setThumbTintList(android.content.res.ColorStateList.valueOf(darkTheme?0xffffdbcC:Color.WHITE));toggle.setTrackTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{ACCENT,MUTED}));
     boolean canEdit=backend!=null&&inventory.optBoolean("writeQualified",false)&&!getPreferences(0).getBoolean("pending",false);
     availability(toggle,canEdit&&((enabled&&p.optBoolean("canDisable",false))||(disabled&&p.optBoolean("canEnable",false))));taskControls.add(toggle);
     toggle.setOnClickListener(button->{toggle.setChecked(enabled);if(detailCurrent())prepare(enabled?"disable":"switch",selectedProfile,"");});add(toggle,28);
-    add(text(enabled?"Enabled on this card.":disabled?"Off. Turn on to use this eSIM.":"State unknown. Refresh before making changes."),14);
+    add(text(enabled?s(R.string.ui_enabled_on_this_card):disabled?s(R.string.ui_off_turn_on_to_use_this_esim):s(R.string.ui_state_unknown_refresh_before_making_changes)),14);
     String active="";JSONArray rows=inventory.optJSONArray("profiles");if(rows!=null)for(int i=0;i<rows.length();i++){JSONObject other=rows.optJSONObject(i);if(other!=null&&"enabled".equalsIgnoreCase(other.optString("state")))active=profileName(other);}
-    add(text(enabled?"Turning this off leaves no eSIM enabled on this card.":active.isEmpty()?"Turning this on enables this eSIM on this card.":"Turning this on turns off "+active+" on this card.",13,MUTED,false),6);
-    Button rename=action("Rename",false,()->{if(detailCurrent()){screen=4;navigationSession++;render();}});availability(rename,canEdit&&p.optBoolean("canRename",false));add(rename,28);
-    Button delete=action("Delete eSIM",false,()->{if(detailCurrent())prepare("delete",selectedProfile,"");});delete.setTextColor(ERROR);availability(delete,canEdit&&disabled&&p.optBoolean("canDelete",false));add(delete,12);
-    if(enabled)add(text("Turn off this eSIM before deleting it.",12,MUTED,false),4);
-    if(!canEdit)add(text("Changes are unavailable until this card and its recovery state are verified.",13,MUTED,false),12);
-    add(text("About this eSIM",16,TEXT,true),28);detailFact("Operator",p.optString("provider",p.optString("name","Not reported")));detailFact("ICCID",selectedIccid);detailFact("Card",cardLabel());
-    add(text("Card state only. Network service has not been checked.",12,MUTED,false),20);
+    add(text(enabled?s(R.string.ui_turning_this_off_leaves_no_esim_enabled_on_this_card):active.isEmpty()?s(R.string.ui_turning_this_on_enables_this_esim_on_this_card):s(R.string.profile_switch_replaces,active),13,MUTED,false),6);
+    Button rename=action(s(R.string.ui_rename),false,()->{if(detailCurrent()){screen=4;navigationSession++;render();}});availability(rename,canEdit&&p.optBoolean("canRename",false));add(rename,28);
+    Button delete=action(s(R.string.ui_delete_esim_166),false,()->{if(detailCurrent())prepare("delete",selectedProfile,"");});delete.setTextColor(ERROR);availability(delete,canEdit&&disabled&&p.optBoolean("canDelete",false));add(delete,12);
+    if(enabled)add(text(s(R.string.ui_turn_off_this_esim_before_deleting_it),12,MUTED,false),4);
+    if(!canEdit)add(text(s(R.string.ui_changes_are_unavailable_until_this_card_and_its_recovery_state_a),13,MUTED,false),12);
+    add(text(s(R.string.ui_about_this_esim),16,TEXT,true),28);detailFact(s(R.string.ui_operator),p.optString("provider",p.optString("name",s(R.string.ui_not_reported))));detailFact("ICCID",selectedIccid);detailFact(s(R.string.ui_card),cardLabel());
+    add(text(s(R.string.ui_card_state_only_network_service_has_not_been_checked),12,MUTED,false),20);
   }
   private void detailFact(String label,String value){LinearLayout row=new LinearLayout(this);row.setPadding(0,dp(14),0,dp(14));row.addView(text(label,13,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));TextView v=text(mask(value),13,TEXT,false);v.setGravity(Gravity.END);row.addView(v,new LinearLayout.LayoutParams(0,-2,2));add(row,0);addDivider();}
-  private void renameScreen(){if(detailProfile==null)return;add(text(cardLabel()+" · EID "+inventory.optString("eidMasked","Not reported"),12,MUTED,false),18);add(text(profileName(detailProfile)+" · "+selectedIccid),22);EditText name=input("Nickname",false);name.setText(detailProfile.optString("nickname",""));add(name,22);add(text("Leave blank to use the operator name.",12,MUTED,false),10);add(action("Save",true,()->{if(!detailCurrent())return;String value=name.getText().toString().trim();if(value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>64||value.matches("(?s).*[\\p{Cntrl}].*")){name.setError("Use at most 64 UTF-8 bytes without control characters");return;}hideKeyboard();prepare("rename",selectedProfile,value);}),28);add(action("Cancel",false,()->{screen=3;navigationSession++;render();}),8);}
-  private void recordsScreen(){add(text("Operation results",22,TEXT,false),24);add(text("This session’s results are shown here. Durable safety records remain in the Shell service; diagnostics omit profile identifiers."),12);for(String value:recentResults)add(text(value,16,TEXT,false),18);if(recentResults.isEmpty())add(text("No operations in this app session."),24);add(action("Verify card and recovery",false,this::reconcile),24);add(action("Export safe diagnostics",false,this::exportDiagnostics),12);}
+  private void renameScreen(){if(detailProfile==null)return;add(text(cardLabel()+s(R.string.ui_eid_156)+inventory.optString("eidMasked",s(R.string.ui_not_reported)),12,MUTED,false),18);add(text(profileName(detailProfile)+" · "+selectedIccid),22);EditText name=input(s(R.string.ui_nickname),false);name.setText(detailProfile.optString("nickname",""));add(name,22);add(text(s(R.string.ui_leave_blank_to_use_the_operator_name),12,MUTED,false),10);add(action(s(R.string.ui_save),true,()->{if(!detailCurrent())return;String value=name.getText().toString().trim();if(value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>64||value.matches("(?s).*[\\p{Cntrl}].*")){name.setError(s(R.string.ui_use_at_most_64_utf_8_bytes_without_control_characters));return;}hideKeyboard();prepare("rename",selectedProfile,value);}),28);add(action(s(R.string.ui_cancel),false,()->{screen=3;navigationSession++;render();}),8);}
+  private void recordsScreen(){add(text(s(R.string.ui_operation_results),22,TEXT,false),24);add(text(s(R.string.ui_this_session_s_results_are_shown_here_durable_safety_records_rem)),12);for(String value:recentResults)add(text(value,16,TEXT,false),18);if(recentResults.isEmpty())add(text(s(R.string.ui_no_operations_in_this_app_session)),24);add(action(s(R.string.ui_verify_card_and_recovery),false,this::reconcile),24);add(action(s(R.string.ui_export_safe_diagnostics),false,this::exportDiagnostics),12);}
   private void connectionScreen(){
-    add(text("Connect with ADB.",28,TEXT,false),28);
-    add(text("One command. No extra script, Shizuku or root."),12);
-    connectionCountdown=text(ConnectionFeedback.countdown(connectionDeadline-android.os.SystemClock.elapsedRealtime()),14,connectionExpired?ERROR:ACCENT,true);
+    add(text(s(R.string.ui_connect_with_adb),28,TEXT,false),28);
+    add(text(s(R.string.ui_one_command_no_extra_script_shizuku_or_root)),12);
+    connectionCountdown=text(countdown(connectionDeadline-android.os.SystemClock.elapsedRealtime()),14,connectionExpired?ERROR:ACCENT,true);
     add(connectionCountdown,20);
-    add(text("1. Connect this phone",18,TEXT,true),24);
-    add(text("Enable USB debugging and authorize your trusted computer. Keep 8bercue open on this page."),10);
-    add(text("2. Run this on your computer",18,TEXT,true),24);
+    add(text(s(R.string.ui_1_connect_this_phone),18,TEXT,true),24);
+    add(text(s(R.string.ui_enable_usb_debugging_and_authorize_your_trusted_computer_keep_8b)),10);
+    add(text(s(R.string.ui_2_run_this_on_your_computer),18,TEXT,true),24);
     TextView command=text(connectionCommand,12,TEXT,false);
     command.setTypeface(android.graphics.Typeface.MONOSPACE);command.setTextIsSelectable(true);
     command.setPadding(dp(16),dp(16),dp(16),dp(16));command.setBackground(rounded(SURFACE,12));add(command,14);
-    Button copy=action("Copy ADB command",true,()->{
+    Button copy=action(s(R.string.ui_copy_adb_command),true,()->{
       android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-      clipboard.setPrimaryClip(ClipData.newPlainText("8bercue ADB connection",connectionCommand));
-      statusPreservingOutcome("Command copied","Run it while the timer is active. Your computer will confirm the connection or explain why it failed.");
+      clipboard.setPrimaryClip(ClipData.newPlainText(s(R.string.adb_clipboard_label),connectionCommand));
+      statusPreservingOutcome(s(R.string.ui_command_copied),s(R.string.ui_run_it_while_the_timer_is_active_your_computer_will_confirm_the));
     });availability(copy,!connectionExpired);add(copy,18);
-    add(action("Start connection again",connectionExpired,this::beginDirectBootstrap),8);
-    add(text("The command stays the same after app updates. With several phones attached, replace adb shell with adb -s SERIAL shell for this phone.",12,MUTED,false),16);
-    add(text("3. Wait for connection confirmation",18,TEXT,true),24);
-    add(text("Your computer must say “8bercue connected” or “already connected”. This page then closes automatically and card access is checked. A running process alone does not confirm a connection."),10);
-    add(text("No profiles are changed by connecting. If the timer expires, tap Start connection again and rerun the same command. Reconnect after a reboot, app update or service termination.",12,MUTED,false),20);
+    add(action(s(R.string.ui_start_connection_again),connectionExpired,this::beginDirectBootstrap),8);
+    add(text(s(R.string.ui_the_command_stays_the_same_after_app_updates_with_several_phones),12,MUTED,false),16);
+    add(text(s(R.string.ui_3_wait_for_connection_confirmation),18,TEXT,true),24);
+    add(text(s(R.string.ui_your_computer_must_say_8bercue_connected_or_already_connected_th)),10);
+    add(text(s(R.string.ui_no_profiles_are_changed_by_connecting_if_the_timer_expires_tap_s),12,MUTED,false),20);
   }
   private GradientDrawable rounded(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
   private void ripple(View v){android.util.TypedValue value=new android.util.TypedValue();getTheme().resolveAttribute(android.R.attr.selectableItemBackground,value,true);v.setBackgroundResource(value.resourceId);}
@@ -782,11 +807,11 @@ public final class MainActivity extends Activity {
     }
     void button(String label, boolean primary, Runnable click) {
       Button b = MainActivity.this.button(label, primary);
-      boolean dismiss = label.equals("Done") || label.equals("Cancel");
+      boolean dismiss = label.equals(s(R.string.ui_done)) || label.equals(s(R.string.ui_cancel));
       if (!dismiss) {
         sheetControls.add(b);b.setEnabled(!OPERATIONS.running());b.setAlpha(OPERATIONS.running() ? .45f : 1f);
       }
-      if (label.startsWith("Delete")) {
+      if (label.equals(s(R.string.ui_delete_permanently)) || label.startsWith(s(R.string.ui_delete))) {
         b.setTextColor(primary ? Color.WHITE : 0xffb42318);
         if (primary) { GradientDrawable red = new GradientDrawable();red.setColor(0xffb42318);red.setCornerRadius(dp(28));b.setBackground(red); }
       }
@@ -824,34 +849,34 @@ public final class MainActivity extends Activity {
     View line = new View(this);line.setBackgroundColor(LINE);content.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
   }
   private void addScreen() {
-    add(text(cardLabel()+" · EID "+inventory.optString("eidMasked","Not checked"),12,MUTED,false),18);
+    add(text(cardLabel()+s(R.string.ui_eid_156)+inventory.optString("eidMasked",s(R.string.ui_not_checked)),12,MUTED,false),18);
     if (backend == null) {
-      add(text("Connect your card to review and install. You can enter or scan your code first.", 14, MUTED, false), 18);
-      add(action("Open connection settings", false, () -> navigate(2)), 10);
+      add(text(s(R.string.ui_connect_your_card_to_review_and_install_you_can_enter_or_scan_yo), 14, MUTED, false), 18);
+      add(action(s(R.string.ui_open_connection_settings), false, () -> navigate(2)), 10);
     }
     if (!draft.form) {
-      add(text("How would you like to add your eSIM?", 16, MUTED, false), 22);
-      add(action("Scan a QR code  ›", true, () -> startActivityForResult(new Intent(this, QrScanActivity.class), QR)), 24);
-      add(action("Choose a QR image  ›", false, () -> {
+      add(text(s(R.string.ui_how_would_you_like_to_add_your_esim), 16, MUTED, false), 22);
+      add(action(s(R.string.ui_scan_a_qr_code), true, () -> startActivityForResult(new Intent(this, QrScanActivity.class), QR)), 24);
+      add(action(s(R.string.ui_choose_a_qr_image), false, () -> {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);i.setType("image/*");i.addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i, IMAGE);
       }), 12);
-      add(action("Enter an activation code  ›", false, () -> { draft.form = true;draft.changed();render(); }), 12);
-      add(text("Use the code provided by your operator. You’ll review the installation before anything changes.", 14, MUTED, false), 24);
+      add(action(s(R.string.ui_enter_an_activation_code), false, () -> { draft.form = true;draft.changed();render(); }), 12);
+      add(text(s(R.string.ui_use_the_code_provided_by_your_operator_you_ll_review_the_install), 14, MUTED, false), 24);
       return;
     }
-    add(text("Activation code", 16, TEXT, true), 24);
+    add(text(s(R.string.ui_activation_code), 16, TEXT, true), 24);
     activation = input("LPA:1$server$matching-id", true);activation.setText(draft.activation);add(activation, 10);
     boolean required = false;
     try { required = ActivationCode.parse(draft.activation).confirmationRequired; } catch (IllegalArgumentException ignored) {}
-    confirmation = input("Operator confirmation code", true);confirmation.setText(draft.confirmation);
+    confirmation = input(s(R.string.ui_operator_confirmation_code), true);confirmation.setText(draft.confirmation);
     if (showConfirmation || required || !draft.confirmation.isEmpty()) {
-      add(text(required ? "Confirmation code (required)" : "Confirmation code", 14, TEXT, true), 18);add(confirmation, 8);
-    } else add(action("Have a confirmation code?", false, () -> { showConfirmation = true;render(); }), 12);
+      add(text(required ? s(R.string.ui_confirmation_code_required) : s(R.string.ui_confirmation_code), 14, TEXT, true), 18);add(confirmation, 8);
+    } else add(action(s(R.string.ui_have_a_confirmation_code), false, () -> { showConfirmation = true;render(); }), 12);
     watchInput(activation);watchInput(confirmation);
     confirmation.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
     confirmation.setOnEditorActionListener((v, action, event) -> { if (action == android.view.inputmethod.EditorInfo.IME_ACTION_DONE && !OPERATIONS.running()) { reviewDownload();return true; }return false; });
-    add(action("Review installation", true, this::reviewDownload), 24);
-    add(text("Codes stay in memory and are sent only to your operator during installation. The new profile stays disabled. Interrupted downloads are never automatically repeated.", 13, MUTED, false), 18);
+    add(action(s(R.string.ui_review_installation), true, this::reviewDownload), 24);
+    add(text(s(R.string.ui_codes_stay_in_memory_and_are_sent_only_to_your_operator_during_i), 13, MUTED, false), 18);
   }
   private void watchInput(EditText field) {
     field.addTextChangedListener(new android.text.TextWatcher() {
@@ -864,63 +889,63 @@ public final class MainActivity extends Activity {
     final IProfileService service=backend;if(service==null||OPERATIONS.running())return;
     clearCredentials();navigationSession++;clearDetailSelection();
     final long choiceSession=navigationSession;
-    run("Reading available cards",false,()->new JSONObject(service.prepareCardSelection()),result->{
+    run(s(R.string.ui_reading_available_cards),false,()->new JSONObject(service.prepareCardSelection()),result->{
       if(backend!=service||navigationSession!=choiceSession)return;
       if(!result.optBoolean("ok",false)){
-        String explanation=SecureElementFailure.message(result.optString("capabilityError",""));
-        status("Card choice unavailable",explanation.isEmpty()?"Reconnect and check recovery. No card was changed.":explanation);render();return;
+        String explanation=UiMessages.known(MainActivity.this,SecureElementFailure.message(result.optString("capabilityError","")));
+        status(s(R.string.ui_card_choice_unavailable),explanation.isEmpty()?s(R.string.ui_reconnect_and_check_recovery_no_card_was_changed):explanation);render();return;
       }
       inventory=new JSONObject();cardInfo=new JSONObject();
-      Sheet choices=new Sheet("Choose a card");
-      choices.copy("Choose the eUICC you intend to manage. This checks card identity only; no profile changes happen. Changing cards discards old operation previews.");
+      Sheet choices=new Sheet(s(R.string.ui_choose_a_card));
+      choices.copy(s(R.string.ui_choose_the_euicc_you_intend_to_manage_this_checks_card_identity));
       JSONArray rows=result.optJSONArray("choices");
       if(rows!=null)for(int i=0;i<rows.length();i++){
         JSONObject choice=rows.optJSONObject(i);if(choice==null)continue;
         String token=choice.optString("token","");
-        choices.button(choice.optString("description","Card")+" · EID "+choice.optString("eidMasked","")+" · "+choice.optString("reader",""),false,()->{
+        choices.button(readerDescription(choice.optString("reader",""),choice.optString("description",s(R.string.ui_card)))+s(R.string.ui_eid_156)+choice.optString("eidMasked","")+" · "+choice.optString("reader",""),false,()->{
           choices.dialog.dismiss();if(backend!=service||navigationSession!=choiceSession)return;
-          run("Verifying selected card",false,()->new JSONObject(service.selectCard(token)),selected->{
+          run(s(R.string.ui_verifying_selected_card),false,()->new JSONObject(service.selectCard(token)),selected->{
             if(backend!=service||navigationSession!=choiceSession)return;
             navigationSession++;clearDetailSelection();inventory=new JSONObject();cardInfo=new JSONObject();compatibility=new JSONObject();notificationStatus="";notificationCleanupAvailable=false;
-            if(!selected.optBoolean("ok",false)){String explanation=SecureElementFailure.message(selected.optString("capabilityError",""));status("Card choice needs verification",explanation.isEmpty()?"The choice expired or the card changed. Choose a card again. No alternative was selected automatically.":explanation);render();return;}
-            screen=0;status("Card selected","Reading this card and its recovery state…");render();checkRecovery();
+            if(!selected.optBoolean("ok",false)){String explanation=UiMessages.known(MainActivity.this,SecureElementFailure.message(selected.optString("capabilityError","")));status(s(R.string.ui_card_choice_needs_verification),explanation.isEmpty()?s(R.string.ui_the_choice_expired_or_the_card_changed_choose_a_card_again_no_al):explanation);render();return;}
+            screen=0;status(s(R.string.ui_card_selected),s(R.string.ui_reading_this_card_and_its_recovery_state));render();checkRecovery();
           });
         });
       }
-      choices.copy("The selection lasts for this Shell service session. A missing or changed selected card stops access; another card is never chosen as a fallback.");
-      choices.button("Cancel",false,()->{choices.dialog.dismiss();refresh();});choices.show();
+      choices.copy(s(R.string.ui_the_selection_lasts_for_this_shell_service_session_a_missing_or));
+      choices.button(s(R.string.ui_cancel),false,()->{choices.dialog.dismiss();refresh();});choices.show();
     });
   }
   private void showCompatibility() {
-    Sheet check=new Sheet("Compatibility check");
-    if(compatibility.length()==0)check.copy("Connect the Shell service, then refresh to check this card. No card has been verified in this connection.");
+    Sheet check=new Sheet(s(R.string.ui_compatibility_check));
+    if(compatibility.length()==0)check.copy(s(R.string.ui_connect_the_shell_service_then_refresh_to_check_this_card_no_car));
     else {
-      check.fact("Selected card channel",compatibility.optString("route","No verified card connection"));
-      check.copy(compatibility.optString("details","No channel observations returned."));
+      check.fact(s(R.string.ui_selected_card_channel),compatibility.optString("route",s(R.string.ui_no_verified_card_connection)));
+      check.copy(UiMessages.compatibility(this,compatibility.optString("details",s(R.string.ui_no_channel_observations_returned))));
       check.copy(compatibility.optBoolean("profileReadVerified",false)
-          ? "Profile reading verified. This read-only check does not test downloads, switching or deletion."
-          : "Profile reading has not been verified. No compatibility check changes a profile.");
+          ? s(R.string.ui_profile_reading_verified_this_read_only_check_does_not_test_down)
+          : s(R.string.ui_profile_reading_has_not_been_verified_no_compatibility_check_cha));
     }
-    check.copy("Order: Secure Element HAL (AIDL, then HIDL), Telephony, then OMAPI. Multiple readable cards require an explicit choice. Unconfirmed channel cleanup stops access. No brand or Android-version list selects a card.");
-    if(backend!=null)check.button("Choose card",false,()->{check.dialog.dismiss();chooseCard();});
-    check.button("Run read-only check",false,()->{check.dialog.dismiss();if(backend!=null||fallback)refresh();else status("Connect first","Use Connect using computer, then run the compatibility check.");});
-    check.button("Done",false,check.dialog::dismiss);check.show();
+    check.copy(s(R.string.ui_order_secure_element_hal_aidl_then_hidl_telephony_then_omapi_mul));
+    if(backend!=null)check.button(s(R.string.ui_choose_card),false,()->{check.dialog.dismiss();chooseCard();});
+    check.button(s(R.string.ui_run_read_only_check),false,()->{check.dialog.dismiss();if(backend!=null||fallback)refresh();else status(s(R.string.ui_connect_first),s(R.string.ui_use_connect_using_computer_then_run_the_compatibility_check));});
+    check.button(s(R.string.ui_done),false,check.dialog::dismiss);check.show();
   }
   private void settings() {
-    add(text("Connection", 19, TEXT, true), 24);
-    add(text("Card connection: "+compatibility.optString("route","Not checked in this connection"),14,MUTED,false),8);
-    add(action("Compatibility check",false,this::showCompatibility),12);
-    if(backend!=null)add(action("Choose card",false,this::chooseCard),12);
-    add(text(directManagement && backend != null ? "Computer connection active"
-          : companionManagement ? "Local companion connected"
-          : binderReadOnlyInventory ? "Read-only diagnostic connection"
-          : backend != null ? "Computer connection active"
-          : fallback ? "Read-only companion connected" : "Not connected", 15, MUTED, false), 8);
+    add(text(s(R.string.ui_connection), 19, TEXT, true), 24);
+    add(text(s(R.string.ui_card_connection)+compatibility.optString("route",s(R.string.ui_not_checked_in_this_connection)),14,MUTED,false),8);
+    add(action(s(R.string.ui_compatibility_check),false,this::showCompatibility),12);
+    if(backend!=null)add(action(s(R.string.ui_choose_card),false,this::chooseCard),12);
+    add(text(directManagement && backend != null ? s(R.string.ui_computer_connection_active)
+          : companionManagement ? s(R.string.ui_local_companion_connected)
+          : binderReadOnlyInventory ? s(R.string.ui_read_only_diagnostic_connection)
+          : backend != null ? s(R.string.ui_computer_connection_active)
+          : fallback ? s(R.string.ui_read_only_companion_connected) : s(R.string.ui_not_connected), 15, MUTED, false), 8);
     if (LabSupport.socketEligible())
-      add(action("Use legacy local companion", useCompanion(), this::selectLegacyCompanion), 12);
-    add(action("Connect using computer", backend==null, this::beginDirectBootstrap), 12);
-    if (BuildConfig.DEBUG) add(action("Check direct Binder Companion (read-only)", false, () -> {
-      run("Checking local Binder", false, () -> {
+      add(action(s(R.string.ui_use_legacy_local_companion), useCompanion(), this::selectLegacyCompanion), 12);
+    add(action(s(R.string.ui_connect_using_computer), backend==null, this::beginDirectBootstrap), 12);
+    if (BuildConfig.DEBUG) add(action(s(R.string.ui_check_direct_binder_companion_read_only), false, () -> {
+      run(s(R.string.ui_checking_local_binder), false, () -> {
         ICompanionProbe probe = CompanionBinderProvider.service();
         if (probe == null) return new JSONObject().put("ok", false).put("status", "not_connected");
         String greeting = probe.getStatus();
@@ -929,33 +954,33 @@ public final class MainActivity extends Activity {
         // IPC diagnostics must not inadvertently touch the radio or eUICC.
         return new JSONObject().put("ok", true).put("status", "binder_identity_verified");
       }, reply -> status(reply.optBoolean("ok", false)
-            ? "Binder transport verified" : "Binder transport unavailable",
-          "IPC identity: " + reply.optString("status", "unknown")
-            + ". No card read was performed."));
+            ? s(R.string.ui_binder_transport_verified) : s(R.string.ui_binder_transport_unavailable),
+          s(R.string.ui_ipc_identity) + reply.optString("status", "unknown")
+            + s(R.string.ui_no_card_read_was_performed)));
     }), 12);
-    if (BuildConfig.DEBUG) add(action("Auto-detect known 5ber card (read-only)", false, () -> {
+    if (BuildConfig.DEBUG) add(action(s(R.string.ui_auto_detect_known_5ber_card_read_only), false, () -> {
       if (binderDetectionRequested) {
-        status("Card discovery already attempted", "Do not repeat a card probe automatically.");
+        status(s(R.string.ui_card_discovery_already_attempted), s(R.string.ui_do_not_repeat_a_card_probe_automatically));
         return;
       }
       binderDetectionRequested = true;
-      run("Detecting 5ber card", false, () -> {
+      run(s(R.string.ui_detecting_5ber_card), false, () -> {
         ICompanionProbe probe = CompanionBinderProvider.service();
         if (probe == null) return new JSONObject().put("ok",false).put("stage","ipc");
         return new JSONObject(probe.detectKnownCard());
-      }, result -> status(result.optBoolean("ok",false) ? "Recognized 5ber card" : "Card not recognized",
+      }, result -> status(result.optBoolean("ok",false) ? s(R.string.ui_recognized_5ber_card) : s(R.string.ui_card_not_recognized),
           result.optBoolean("ok",false)
-              ? result.optString("knownCard","known") + " on " + result.optString("reader","unknown")
-                  + ". Discovery only; writes remain restricted."
-              : "Stage=" + result.optString("stage","unavailable")));
+              ? result.optString("knownCard","known") + s(R.string.ui_on) + result.optString("reader","unknown")
+                  + s(R.string.ui_discovery_only_writes_remain_restricted)
+              : s(R.string.ui_stage) + result.optString("stage","unavailable")));
     }), 12);
-    if (BuildConfig.DEBUG) add(action("Read via direct Binder (read-only)", false, () -> {
+    if (BuildConfig.DEBUG) add(action(s(R.string.ui_read_via_direct_binder_read_only), false, () -> {
       if (binderReadRequested) {
-        status("Binder read already attempted", "Do not repeat a failed or uncertain card read.");
+        status(s(R.string.ui_binder_read_already_attempted), s(R.string.ui_do_not_repeat_a_failed_or_uncertain_card_read));
         return;
       }
       binderReadRequested = true;
-      run("Binder card read", false, () -> {
+      run(s(R.string.ui_binder_card_read), false, () -> {
         ICompanionProbe probe = CompanionBinderProvider.service();
         if (probe == null) return new JSONObject().put("ok", false).put("stage", "ipc");
         JSONObject reply = new JSONObject(probe.listProfiles());
@@ -974,118 +999,122 @@ public final class MainActivity extends Activity {
           binderReadOnlyInventory = true;
           inventory = reply;
           screen = 0;
-          status("Binder card read complete", "Recognized " + reply.optString("knownCard","card")
-              + " on " + reply.optString("reader","unknown")
-              + "; " + reply.optInt("count",0) + " profiles. Read-only; no editing permission.");
+          status(s(R.string.ui_binder_card_read_complete), s(R.string.ui_recognized) + reply.optString("knownCard","card")
+              + s(R.string.ui_on) + reply.optString("reader","unknown")
+              + "; " + reply.optInt("count",0) + s(R.string.ui_profiles_read_only_no_editing_permission));
           render();
         } else {
-          status("Binder read unavailable", "Stage=" + reply.optString("stage","unknown"));
+          status(s(R.string.ui_binder_read_unavailable), s(R.string.ui_stage) + reply.optString("stage","unknown"));
         }
       });
     }), 12);
-    add(action("Setup help  ›", false, () -> {
-      Sheet help = new Sheet("Connect your card");
-      help.copy("Connect this phone by USB, enable USB debugging and accept the computer authorization prompt. Choose Connect using computer, then copy and run the displayed ADB command. No Python or additional download is required.");
-      help.copy("After connection, open Compatibility check. A connected service alone does not prove card access: confirm the selected card channel and a fresh profile list. No card changes are made by the check.");
-      help.copy("Reconnect after a phone restart, app update or service termination. Failed operations are never automatically repeated.");help.button("Done", false, help.dialog::dismiss);help.show();
+    add(action(s(R.string.ui_setup_help), false, () -> {
+      Sheet help = new Sheet(s(R.string.ui_connect_your_card));
+      help.copy(s(R.string.ui_connect_this_phone_by_usb_enable_usb_debugging_and_accept_the_co));
+      help.copy(s(R.string.ui_after_connection_open_compatibility_check_a_connected_service_al));
+      help.copy(s(R.string.ui_reconnect_after_a_phone_restart_app_update_or_service_terminatio));help.button(s(R.string.ui_done), false, help.dialog::dismiss);help.show();
     }), 12);
-    add(text("Appearance",19,TEXT,true),28);
-    add(action(darkTheme?"Theme: Dark":"Theme: Light",false,()->{getPreferences(0).edit().putBoolean("darkTheme",!darkTheme).apply();applyPalette();render();}),12);
-    add(text("Support",19,TEXT,true),28);
-    add(action("Operation records",false,()->{screen=5;navigationSession++;render();}),12);
-    add(text("Card", 19, TEXT, true), 28);
-    add(text("EID  " + mask(cardInfo.optString("eidMasked", inventory.optString("eidMasked", "Not checked")))), 10);
-    add(text("Profiles  " + (inventory.optJSONArray("profiles") == null ? "Not checked" : inventory.optJSONArray("profiles").length())), 8);
-    add(text("Storage  " + (cardInfo.length() == 0 ? "Not checked" : storage())), 8);
-    add(action(cardInfo.length() == 0 ? "Read card information" : "Refresh card information", false, () -> {
+    add(text(s(R.string.language_title),19,TEXT,true),28);
+    add(action(s(R.string.language_current,AppLanguage.label(this)),false,this::chooseLanguage),12);
+    add(text(s(R.string.ui_appearance),19,TEXT,true),28);
+    add(action(darkTheme?s(R.string.ui_theme_dark):s(R.string.ui_theme_light),false,()->{getPreferences(0).edit().putBoolean("darkTheme",!darkTheme).apply();applyPalette();render();}),12);
+    add(text(s(R.string.ui_support),19,TEXT,true),28);
+    add(action(s(R.string.ui_operation_records),false,()->{screen=5;navigationSession++;render();}),12);
+    add(text(s(R.string.ui_card), 19, TEXT, true), 28);
+    add(text(s(R.string.ui_eid_269) + mask(cardInfo.optString("eidMasked", inventory.optString("eidMasked", s(R.string.ui_not_checked))))), 10);
+    add(text(s(R.string.ui_profiles) + (inventory.optJSONArray("profiles") == null ? s(R.string.ui_not_checked) : inventory.optJSONArray("profiles").length())), 8);
+    add(text(s(R.string.ui_storage) + (cardInfo.length() == 0 ? s(R.string.ui_not_checked) : storage())), 8);
+    add(action(cardInfo.length() == 0 ? s(R.string.ui_read_card_information) : s(R.string.ui_refresh_card_information), false, () -> {
       IProfileService service = backend;
-      if (service == null) { status("Connect your card first", "Card information needs the authorized service.");return; }
-      run("Reading card information", false, () -> new JSONObject(service.getCardInfo()), r -> {
-        if (!r.optBoolean("ok", false)) { status("Card information unavailable", "Reconnect and refresh the card.");return; }
-        cardInfo = r;status("Card information checked", "Only details reported by your card are shown.");render();
+      if (service == null) { status(s(R.string.ui_connect_your_card_first), s(R.string.ui_card_information_needs_the_authorized_service));return; }
+      run(s(R.string.ui_reading_card_information), false, () -> new JSONObject(service.getCardInfo()), r -> {
+        if (!r.optBoolean("ok", false)) { status(s(R.string.ui_card_information_unavailable), s(R.string.ui_reconnect_and_refresh_the_card));return; }
+        cardInfo = r;status(s(R.string.ui_card_information_checked), s(R.string.ui_only_details_reported_by_your_card_are_shown));render();
       });
     }), 16);
-    if (cardInfo.length() > 0) add(action("Capability details  ›", false, () -> {
-      Sheet info = new Sheet("Card capabilities");
-      info.copy(cardInfo.optBoolean("capabilitiesSupported", false) ? capabilitySummary() : "Optional capabilities were not reported by this reader.");
-      info.button("Done", false, info.dialog::dismiss);info.show();
+    if (cardInfo.length() > 0) add(action(s(R.string.ui_capability_details), false, () -> {
+      Sheet info = new Sheet(s(R.string.ui_card_capabilities));
+      info.copy(cardInfo.optBoolean("capabilitiesSupported", false) ? capabilitySummary() : s(R.string.ui_optional_capabilities_were_not_reported_by_this_reader));
+      info.button(s(R.string.ui_done), false, info.dialog::dismiss);info.show();
     }), 10);
     if (!notificationStatus.isEmpty()) {
-      add(text("Operator notification", 19, TEXT, true), 24);
-      add(text(NotificationPresentation.message(notificationStatus), 14, MUTED, false), 8);
-      if (notificationCleanupAvailable) add(action("Review notification cleanup", false, this::prepareNotificationCleanup), 12);
+      add(text(s(R.string.ui_operator_notification), 19, TEXT, true), 24);
+      add(text(UiMessages.known(MainActivity.this,NotificationPresentation.message(notificationStatus)), 14, MUTED, false), 8);
+      if (notificationCleanupAvailable) add(action(s(R.string.ui_review_notification_cleanup), false, this::prepareNotificationCleanup), 12);
     }
-    if (getPreferences(0).getBoolean("pending", false)) add(action("Verify card and recovery", true, this::reconcile), 24);
-    add(action("Recovery & advanced  ›", false, () -> {
-      Sheet advanced = new Sheet("Recovery & advanced");
-      advanced.copy("An interrupted operation may have an unknown outcome. Reconnect and verify the card before making changes. Do not reuse an activation code until the operator confirms it is safe.");
-      advanced.button("Verify card and recovery", false, () -> { advanced.dialog.dismiss();reconcile(); });
-      if (LabSupport.socketEligible()) advanced.button("Recover local companion", false, () -> { advanced.dialog.dismiss();recoverFallback(); });
-      advanced.button("Export safe diagnostics", false, this::exportDiagnostics);
-      advanced.copy("Diagnostics exclude activation codes, profile names, identifiers and raw protocol logs.");
-      advanced.button("Done", false, advanced.dialog::dismiss);advanced.show();
+    if (getPreferences(0).getBoolean("pending", false)) add(action(s(R.string.ui_verify_card_and_recovery), true, this::reconcile), 24);
+    add(action(s(R.string.ui_recovery_advanced), false, () -> {
+      Sheet advanced = new Sheet(s(R.string.ui_recovery_advanced_285));
+      advanced.copy(s(R.string.ui_an_interrupted_operation_may_have_an_unknown_outcome_reconnect_a));
+      advanced.button(s(R.string.ui_verify_card_and_recovery), false, () -> { advanced.dialog.dismiss();reconcile(); });
+      if (LabSupport.socketEligible()) advanced.button(s(R.string.ui_recover_local_companion), false, () -> { advanced.dialog.dismiss();recoverFallback(); });
+      advanced.button(s(R.string.ui_export_safe_diagnostics), false, this::exportDiagnostics);
+      advanced.copy(s(R.string.ui_diagnostics_exclude_activation_codes_profile_names_identifiers_a));
+      advanced.button(s(R.string.ui_done), false, advanced.dialog::dismiss);advanced.show();
     }), 24);
-    add(action("Privacy information", false, () -> showBundledText("Privacy information", "legal/privacy.txt")), 20);
-    add(action("Third-party notices", false, () -> showBundledText("Third-party notices", "legal/third-party-notices.txt")), 12);
-    add(text("Independent project. Not an official 5ber product.", 12, MUTED, false), 20);
+    add(action(s(R.string.ui_privacy_information), false, () -> showBundledText(s(R.string.ui_privacy_information), "legal/privacy.txt")), 20);
+    add(action(s(R.string.ui_third_party_notices), false, () -> showBundledText(s(R.string.ui_third_party_notices), "legal/third-party-notices.txt")), 12);
+    add(text(s(R.string.ui_independent_project_not_an_official_5ber_product), 12, MUTED, false), 20);
     add(text("8bercue " + BuildConfig.VERSION_NAME, 12, MUTED, false), 12);
   }
   private void showBundledText(String title, String asset) {
+    if(AppLanguage.isChinese(this)&&asset.equals("legal/privacy.txt"))asset="legal/privacy-zh-Hans.txt";
     try (java.io.InputStream input = getAssets().open(asset)) {
       java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
       byte[] buffer = new byte[4096];int count;
       while ((count = input.read(buffer)) != -1) {
-        if (bytes.size() + count > 262144) throw new java.io.IOException("Document too large");
+        if (bytes.size() + count > 262144) throw new java.io.IOException(s(R.string.ui_document_too_large));
         bytes.write(buffer, 0, count);
       }
       Sheet document = new Sheet(title);
+      if(asset.equals("legal/third-party-notices.txt"))document.copy(s(R.string.privacy_original));
       document.copy(bytes.toString(java.nio.charset.StandardCharsets.UTF_8.name()));
-      document.button("Done", false, document.dialog::dismiss);document.show();
-    } catch (java.io.IOException unavailable) { status("Document unavailable", "Reinstall the verified application package."); }
+      document.button(s(R.string.ui_done), false, document.dialog::dismiss);document.show();
+    } catch (java.io.IOException unavailable) { status(s(R.string.ui_document_unavailable), s(R.string.ui_reinstall_the_verified_application_package)); }
   }
   private void prepareNotificationCleanup() {
     final IProfileService service = backend;
     if (service == null) { connect();return; }
     final long session = navigationSession;
-    run("Checking notification cleanup", false, () -> new JSONObject(service.prepareNotificationCleanup()), r -> {
+    run(s(R.string.ui_checking_notification_cleanup), false, () -> new JSONObject(service.prepareNotificationCleanup()), r -> {
       if (backend != service || navigationSession != session) return;
       String token = r.optString("token", "");
       if (!r.optBoolean("ok", false) || token.isEmpty()) {
-        status("Cleanup unavailable", "Reconnect and check notification status. No message was resent.");return;
+        status(s(R.string.ui_cleanup_unavailable), s(R.string.ui_reconnect_and_check_notification_status_no_message_was_resent));return;
       }
-      Sheet sheet = new Sheet("Clean up acknowledged notification?");
-      sheet.copy("The operator already acknowledged this notification. This removes only that notification from the verified card. It does not resend it or change your eSIM profiles.");
-      sheet.button("Clean up", true, () -> {
+      Sheet sheet = new Sheet(s(R.string.ui_clean_up_acknowledged_notification));
+      sheet.copy(s(R.string.ui_the_operator_already_acknowledged_this_notification_this_removes));
+      sheet.button(s(R.string.ui_clean_up), true, () -> {
         sheet.dialog.dismiss();
-        if (backend != service) { status("Connection changed", "Reconnect and review cleanup again.");return; }
-        run("Cleaning up notification", true, () -> new JSONObject(service.executeNotificationCleanup(token)), result -> {
+        if (backend != service) { status(s(R.string.ui_connection_changed), s(R.string.ui_reconnect_and_review_cleanup_again));return; }
+        run(s(R.string.ui_cleaning_up_notification), true, () -> new JSONObject(service.executeNotificationCleanup(token)), result -> {
           notificationStatus = result.optString("notificationStatus", "unavailable");
           notificationCleanupAvailable = result.optBoolean("notificationCleanupAvailable", false);
-          notice = NotificationPresentation.message(notificationStatus);
+          notice = UiMessages.known(MainActivity.this,NotificationPresentation.message(notificationStatus));
           if (!result.optBoolean("notificationWorkerStopped", true))
-            notice += "\nReconnect the local service using your computer and verify the card before another operation.";
+            notice += s(R.string.ui_reconnect_the_local_service_using_your_computer_and_verify_the_c);
           checkRecovery();
         });
       });
-      sheet.button("Cancel", false, sheet.dialog::dismiss);sheet.show();
+      sheet.button(s(R.string.ui_cancel), false, sheet.dialog::dismiss);sheet.show();
     });
   }
   private TextView text(String value) { return text(value, 14, MUTED, false); }
   private void recoverFallback() {
-    Sheet recovery = new Sheet("Authorize local ADB recovery?");
-    recovery.copy("This requests full ADB Shell debugging authority, not just eSIM access. It uses the existing local ADB setup and does not change network settings. TCP debugging may be reachable on your network; use a trusted network. Android will ask separately for RSA authorization.");
-    recovery.button("Continue", true, () -> {
-      recovery.dialog.dismiss();run("Recovering local companion", false, () -> {
+    Sheet recovery = new Sheet(s(R.string.ui_authorize_local_adb_recovery));
+    recovery.copy(s(R.string.ui_this_requests_full_adb_shell_debugging_authority_not_just_esim_a));
+    recovery.button(s(R.string.ui_continue), true, () -> {
+      recovery.dialog.dismiss();run(s(R.string.ui_recovering_local_companion), false, () -> {
         LocalAdbBootstrap.Result r = LocalAdbBootstrap.start(getApplicationContext());
         return new JSONObject().put("ready", r.ready).put("authorization", r.needsAuthorization);
-      }, r -> { if (r.optBoolean("ready")) probeFallback();else status("Recovery not complete", r.optBoolean("authorization") ? "Approve Android’s RSA prompt, then try recovery again." : "Check the supported ADB setup and reconnect."); });
+      }, r -> { if (r.optBoolean("ready")) probeFallback();else status(s(R.string.ui_recovery_not_complete), r.optBoolean("authorization") ? s(R.string.ui_approve_android_s_rsa_prompt_then_try_recovery_again) : s(R.string.ui_check_the_supported_adb_setup_and_reconnect)); });
     });
-    recovery.button("Cancel", false, recovery.dialog::dismiss);recovery.show();
+    recovery.button(s(R.string.ui_cancel), false, recovery.dialog::dismiss);recovery.show();
   }
   private String capabilitySummary() {
     StringBuilder result = new StringBuilder();
-    String[][] fields = {{"profileVersion", "Profile spec"}, {"gsmaVersion", "GSMA spec"},
-        {"firmwareVersion", "Firmware"}};
+    String[][] fields = {{"profileVersion", s(R.string.ui_profile_spec)}, {"gsmaVersion", s(R.string.ui_gsma_spec)},
+        {"firmwareVersion", s(R.string.ui_firmware)}};
     for (String[] field : fields)
       if (cardInfo.has(field[0])) {
         if (result.length() > 0)
@@ -1096,15 +1125,15 @@ public final class MainActivity extends Activity {
       if (result.length() > 0)
         result.append("; ");
       result.append(cardInfo.optBoolean("additionalProfileSupported")
-              ? "Additional profile supported"
-              : "Additional profile not supported");
+              ? s(R.string.ui_additional_profile_supported)
+              : s(R.string.ui_additional_profile_not_supported));
     }
-    return result.length() == 0 ? "No optional details reported" : result.toString();
+    return result.length() == 0 ? s(R.string.ui_no_optional_details_reported) : result.toString();
   }
   private String storage() {
     long bytes = cardInfo.optLong(
         "freeNonvolatileMemoryBytes", cardInfo.optLong("freeNonvolatileBytes", -1));
-    return bytes >= 0 ? (bytes / 1024) + " KB available" : "Not reported";
+    return bytes >= 0 ? (bytes / 1024) + s(R.string.ui_kb_available) : s(R.string.ui_not_reported);
   }
   private void exportDiagnostics() {
     String report = "8bercue " + BuildConfig.VERSION_NAME + "\nAndroid API "
@@ -1120,7 +1149,7 @@ public final class MainActivity extends Activity {
     send.setType("text/plain");
     send.putExtra(Intent.EXTRA_SUBJECT, "8bercue diagnostics");
     send.putExtra(Intent.EXTRA_TEXT, report);
-    startActivity(Intent.createChooser(send, "Export safe diagnostics"));
+    startActivity(Intent.createChooser(send, s(R.string.ui_export_safe_diagnostics)));
   }
   @Override
   protected void onActivityResult(int request, int result, Intent data) {
@@ -1135,7 +1164,7 @@ public final class MainActivity extends Activity {
   }
   private void importImage(android.net.Uri uri) {
     final long importedSession = draft.revision();
-    run("Reading QR image", false, () -> {
+    run(s(R.string.ui_reading_qr_image), false, () -> {
       ImageDecoder.Source source = ImageDecoder.createSource(getContentResolver(), uri);
       Bitmap bitmap = ImageDecoder.decodeBitmap(source, (decoder, info, src) -> {
         int w = info.getSize().getWidth(), h = info.getSize().getHeight();
@@ -1152,7 +1181,7 @@ public final class MainActivity extends Activity {
   }
   private void setCode(String code) {
     if (code == null || code.isEmpty()) {
-      status("No QR code found", "Choose a clear QR image or enter the activation code manually.");
+      status(s(R.string.ui_no_qr_code_found), s(R.string.ui_choose_a_clear_qr_image_or_enter_the_activation_code_manually));
       return;
     }
     draft.acceptCode(code);
@@ -1162,10 +1191,10 @@ public final class MainActivity extends Activity {
     activation = null;
     render();
     activation.setText(code);
-    status("QR code read", "Review the code, then validate it before installation.");
+    status(s(R.string.ui_qr_code_read), s(R.string.ui_review_the_code_then_validate_it_before_installation));
   }
   private String safeState(String s) {
-    return s.matches("[A-Za-z_ -]{1,60}") ? s : "requires verification";
+    return s.matches("[A-Za-z_ -]{1,60}") ? s : s(R.string.ui_requires_verification);
   }
   private String mask(String value) {
     return value.replaceAll("[0-9]{12,}", "••••");
@@ -1177,10 +1206,10 @@ public final class MainActivity extends Activity {
     boolean running = OPERATIONS.running();
     boolean pending = getPreferences(0).getBoolean("pending", false);
     if (busyProgress != null) busyProgress.setVisibility(running ? View.VISIBLE : View.GONE);
-    statusBox.setVisibility(UiStatusPolicy.visible(running,pending,!notice.isEmpty(),backend!=null,title)?View.VISIBLE:View.GONE);
+    statusBox.setVisibility(UiStatusPolicy.visible(running,pending,!notice.isEmpty(),backend!=null,canonicalTitle())?View.VISIBLE:View.GONE);
     statusBox.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-    statusTitle.setText(running ? OPERATIONS.title() : !notice.isEmpty() ? pending ? "Needs verification" : "Update" : title);
-    statusDetail.setText(running ? detail : !notice.isEmpty() ? notice : detail + (pending ? "\nSafety verification is required. Use Settings → Verify card and recovery before further changes." : ""));
+    statusTitle.setText(running ? OPERATIONS.title() : !notice.isEmpty() ? pending ? s(R.string.ui_needs_verification) : s(R.string.ui_update) : title);
+    statusDetail.setText(running ? detail : !notice.isEmpty() ? notice : detail + (pending ? s(R.string.ui_safety_verification_is_required_use_settings_verify_card_and_rec) : ""));
   }
   private void status(String a, String b) {
     notice = "";title = a;detail = b;updateStatusRegion();
@@ -1224,7 +1253,7 @@ public final class MainActivity extends Activity {
         }
         click.run();
       } else
-        status(OPERATIONS.title(), "Please wait for the current operation to finish.");
+        status(OPERATIONS.title(), s(R.string.ui_please_wait_for_the_current_operation_to_finish));
     });
     return b;
   }
@@ -1273,6 +1302,8 @@ public final class MainActivity extends Activity {
     p.topMargin = dp(top);
     return p;
   }
+  private String s(int id) { return getResources().getString(id); }
+  private String s(int id, Object... args) { return getResources().getString(id, args); }
   private int dp(float x) {
     return Math.round(getResources().getDisplayMetrics().density * x);
   }

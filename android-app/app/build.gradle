@@ -10,9 +10,11 @@ android {
         applicationId 'dev.sid.fiveberinspector'
         minSdk 28
         targetSdk 36
-        versionCode 41
-        versionName '0.19.0-beta.1'
+        versionCode 42
+        versionName '0.19.1-rc1'
     }
+
+    bundle { language { enableSplit = false } }
 
     buildFeatures {
         aidl true

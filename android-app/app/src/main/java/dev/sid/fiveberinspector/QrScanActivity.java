@@ -34,6 +34,7 @@ public final class QrScanActivity extends Activity implements SurfaceHolder.Call
   private boolean surfaceReady, resumed, permissionRequested;
   private int cameraSession;
 
+  @Override protected void attachBaseContext(android.content.Context base){super.attachBaseContext(AppLanguage.wrap(base));}
   @Override
   public void onCreate(Bundle state) {
     super.onCreate(state);
@@ -56,12 +57,12 @@ public final class QrScanActivity extends Activity implements SurfaceHolder.Call
     root.setOrientation(LinearLayout.VERTICAL);
     root.setBackgroundColor(MainActivity.BG);
     PageHeader.applyInsets(root);
-    root.addView(new PageHeader(this, "Scan QR code", "Back to Add eSIM", this::finish, null));
+    root.addView(new PageHeader(this, s(R.string.ui_scan_qr_code), s(R.string.ui_back_to_add_esim), this::finish, null));
     LinearLayout body = new LinearLayout(this);
     body.setOrientation(LinearLayout.VERTICAL);
     body.setPadding(dp(24), 0, dp(24), dp(16));
     TextView help =
-        text("Place the operator’s QR code inside the frame.", 14, MainActivity.MUTED, false);
+        text(s(R.string.ui_place_the_operator_s_qr_code_inside_the_frame), 14, MainActivity.MUTED, false);
     body.addView(help, margin(14));
 
     previewFrame = new PreviewFrame();
@@ -75,28 +76,27 @@ public final class QrScanActivity extends Activity implements SurfaceHolder.Call
     frameLayout.bottomMargin = dp(20);
     body.addView(previewFrame, frameLayout);
     preview = new SurfaceView(this);
-    preview.setContentDescription("Live camera preview");
+    preview.setContentDescription(s(R.string.ui_live_camera_preview));
     previewFrame.addView(preview, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
     corners = new ScanCorners();
     corners.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
     corners.setVisibility(View.INVISIBLE);
     previewFrame.addView(corners, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
-    previewMessage = text("Preparing camera…", 16, 0xffffffff, false);
+    previewMessage = text(s(R.string.ui_preparing_camera), 16, 0xffffffff, false);
     previewMessage.setGravity(Gravity.CENTER);
     previewMessage.setPadding(dp(24), dp(16), dp(24), dp(16));
     previewFrame.addView(previewMessage, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
 
-    statusTitle = text("Preparing camera", 17, MainActivity.TEXT, true);
+    statusTitle = text(s(R.string.ui_preparing_camera_342), 17, MainActivity.TEXT, true);
     statusTitle.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
     body.addView(statusTitle);
-    statusDetail = text("Your code is read on this phone. Installation starts only after your "
-            + "review and confirmation.",
+    statusDetail = text(s(R.string.ui_your_code_is_read_on_this_phone_installation_starts_only_after_y),
         14, MainActivity.MUTED, false);
     body.addView(statusDetail, margin(6));
-    retry = button("Try again", true);
+    retry = button(s(R.string.ui_try_again), true);
     retry.setVisibility(View.GONE);
     body.addView(retry, margin(14));
-    Button alternative = button("Use image or code", false);
+    Button alternative = button(s(R.string.ui_use_image_or_code), false);
     alternative.setOnClickListener(v -> finish());
     body.addView(alternative, margin(10));
     if (largeText) {
@@ -120,9 +120,9 @@ public final class QrScanActivity extends Activity implements SurfaceHolder.Call
   private void showPermissionState() {
     boolean settingsRequired =
         permissionRequested && !shouldShowRequestPermissionRationale(Manifest.permission.CAMERA);
-    showUnavailable("Camera access needed", "Camera access is off",
-        "Allow camera access to scan. You can also go back to import an image or enter a code.");
-    retry.setText(settingsRequired ? "Open app settings" : "Allow camera");
+    showUnavailable(s(R.string.ui_camera_access_needed), s(R.string.ui_camera_access_is_off),
+        s(R.string.ui_allow_camera_access_to_scan_you_can_also_go_back_to_import_an_im));
+    retry.setText(settingsRequired ? s(R.string.ui_open_app_settings) : s(R.string.ui_allow_camera));
     retry.setOnClickListener(v -> {
       if (hasCameraPermission()) {
         start();
@@ -133,9 +133,7 @@ public final class QrScanActivity extends Activity implements SurfaceHolder.Call
           startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
               Uri.parse("package:" + getPackageName())));
         } catch (android.content.ActivityNotFoundException e) {
-          statusDetail.setText("Open Android Settings → Apps → "
-              + getApplicationInfo().loadLabel(getPackageManager())
-              + " → Permissions to allow camera access, or go back to import an image.");
+          statusDetail.setText(s(R.string.camera_settings_help,getApplicationInfo().loadLabel(getPackageManager())));
         }
       } else
         requestCameraPermission();
@@ -150,10 +148,9 @@ public final class QrScanActivity extends Activity implements SurfaceHolder.Call
     retry.setVisibility(View.VISIBLE);
   }
   private void cameraUnavailable() {
-    showUnavailable("Camera unavailable", "Camera preview unavailable",
-        "Another app may be using the camera. Close it and try again, or go back to import an "
-            + "image or enter a code.");
-    retry.setText("Try camera again");
+    showUnavailable(s(R.string.ui_camera_unavailable), s(R.string.ui_camera_preview_unavailable),
+        s(R.string.ui_another_app_may_be_using_the_camera_close_it_and_try_again_or_go));
+    retry.setText(s(R.string.ui_try_camera_again));
     retry.setOnClickListener(v -> {
       stop();
       start();
@@ -207,7 +204,7 @@ public final class QrScanActivity extends Activity implements SurfaceHolder.Call
     }
     try {
       if (Camera.getNumberOfCameras() == 0)
-        throw new IllegalStateException("No camera");
+        throw new IllegalStateException(s(R.string.ui_no_camera));
       int cameraId = 0;
       Camera.CameraInfo info = new Camera.CameraInfo();
       for (int i = 0; i < Camera.getNumberOfCameras(); i++) {
@@ -273,9 +270,8 @@ public final class QrScanActivity extends Activity implements SurfaceHolder.Call
       corners.setVisibility(View.VISIBLE);
       previewMessage.setVisibility(View.GONE);
       retry.setVisibility(View.GONE);
-      statusTitle.setText("Ready to scan");
-      statusDetail.setText("Keep the full code in view and hold steady. Your code stays on this "
-          + "phone until you review and confirm installation.");
+      statusTitle.setText(s(R.string.ui_ready_to_scan));
+      statusDetail.setText(s(R.string.ui_keep_the_full_code_in_view_and_hold_steady_your_code_stays_on_th));
     } catch (Exception e) {
       stop();
       cameraUnavailable();
@@ -410,6 +406,8 @@ public final class QrScanActivity extends Activity implements SurfaceHolder.Call
     p.topMargin = dp(top);
     return p;
   }
+  private String s(int id) { return getResources().getString(id); }
+  private String s(int id, Object... args) { return getResources().getString(id, args); }
   private int dp(float value) {
     return Math.round(value * getResources().getDisplayMetrics().density);
   }

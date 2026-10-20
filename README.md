@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/sidnvy/8bercue/releases">Download APK</a> ·
-  <a href="https://github.com/sidnvy/8bercue/releases/tag/v0.18.0-beta.1">Release notes</a> ·
+  <a href="https://github.com/sidnvy/8bercue/releases/tag/v0.19.0-beta.1">Release notes</a> ·
   <a href="https://github.com/sidnvy/8bercue/issues">Feedback</a>
 </p>
 
@@ -32,7 +32,7 @@ Manage profiles on compatible eUICCs, including removable cards such as 5ber, fr
 
 The APK installs on **ARM64 Android 9+**. Card management also requires a compatible eUICC and a usable HAL, Telephony or OMAPI channel with the required system permissions. Android version and ADB access alone do not guarantee card access. Available management actions depend on the connection. See [device compatibility](docs/COMPATIBILITY.md).
 
-This branch checks the actual card connection automatically: Secure Element HAL first, then Telephony, with OMAPI as another fallback. **Compatibility check** shows the selected channel and missing conditions. If several cards are readable, use **Choose card** to select the intended eUICC. No phone-brand or Android 16 admission list is used. The published Beta retains its older limits.
+This version checks the actual card connection automatically: Secure Element HAL first, then Telephony, with OMAPI as another fallback. **Compatibility check** shows the selected channel and missing conditions. If several cards are readable, use **Choose card** to select the intended eUICC. No phone-brand or Android 16 admission list is used. The previous 0.18 Beta retains its older limits.
 
 Connect once with a computer using **ADB**. No separate privilege-manager app is required. Reconnect after a reboot, app update or service termination.
 
@@ -44,7 +44,7 @@ On the connection screen, choose **Copy ADB command** and run it while the two-m
 
 Manage the selected card from the profile list. Open a profile to turn it on/off, rename it or delete it. Switching and saving a nickname execute directly; installation and deletion require confirmation. Enabled profiles must be turned off before deletion. Connection, compatibility and recovery details are in Settings.
 
-Currently in **Beta**. See the [release notes](https://github.com/sidnvy/8bercue/releases/tag/v0.18.0-beta.1) for setup details, migration guidance and known issues.
+Currently in **Beta**. See the [release notes](https://github.com/sidnvy/8bercue/releases/tag/v0.19.0-beta.1) for setup details, migration guidance and known issues.
 
 ## Build & contribute
 

@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "java": "openjdk version \"21.0.12.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Temurin-21.0.12.1+1 (build 21.0.12.1+1-LTS)\nOpenJDK 64-Bit Server VM Temurin-21.0.12.1+1 (build 21.0.12.1+1-LTS, mixed mode, sharing)",
+  "java": "openjdk version \"17.0.20.1\" 2026-08-18\nOpenJDK Runtime Environment (build 17.0.20.1+1)\nOpenJDK 64-Bit Server VM (build 17.0.20.1+1, mixed mode, sharing)",
   "gradle": "8.13",
   "androidGradlePlugin": "8.11.1",
   "compileSdk": 36,
@@ -32,5 +32,6 @@
       "sha256": "81a82aaea5abcc8ff68b3dfcb58b3c3c429378efd98e7433460610fecd7ae45f"
     }
   },
-  "compilerRuntimeReview": "Linked-runtime notice/source applicability remains under review; this SBOM does not assert complete toolchain license clearance."
+  "compilerRuntimeReview": "Linked-runtime notice/source applicability remains under review; this SBOM does not assert complete toolchain license clearance.",
+  "releaseBuild": "0.19.0-beta.1 / 41; local Gradle 8.13, AGP 8.11.1, SDK platform 36/build-tools 35.0.0; existing native payload reused unchanged"
 }

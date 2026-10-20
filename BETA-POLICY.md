@@ -1,7 +1,9 @@
 # Beta distribution policy
 
-The owner selected Beta distribution on 2026-10-19. README.md defines the tested scope, experimental functionality, migration instructions and feedback channel. The same signed APK and corresponding source already verified are distributed without modification.
+The owner authorized the original Beta distribution on 2026-10-19 and a new GitHub Beta release/source push on 2026-10-20. The current release is 0.19.0-beta.1 / versionCode 41. The previous v0.18.0-beta.1 tag and attachments remain unchanged. Release notes document exact-build validation, known limits, migration and feedback.
 
-Production readiness remains false. Historical NO-GO statements in release engineering documents refer to complete production/stable qualification; this Beta policy permits the disclosed limited Beta distribution and does not rewrite those test results. Full production gates remain recorded separately. No operation confirmations, recovery controls, identity binding or deletion safeguards have been removed.
+Full stable/production readiness remains false. Historical NO-GO statements refer to complete stable qualification; the Beta policy permits disclosed limited Beta distribution and does not rewrite test results. Existing identity binding, explicit write actions, one-use confirmations, transaction journals and unknown-result recovery remain in place.
 
-The archive SHA256.json manifest describes the original corresponding-source archive. README.md, PRIVACY.txt, BETA-READINESS.json, BETA-POLICY.md and .gitignore are additional publication materials in this repository. They do not alter release build inputs. The Git tag identifies this publication snapshot; the Release source attachment is the exact independently rebuilt archive.
+The signed APK, full corresponding source, build scripts, local patches, dependency sources, licenses, privacy policy, public certificate and checksums accompany this Release. Private keys, activation credentials and private device/test evidence are excluded. The Git tag identifies the source publication snapshot. SHA256.json records tracked source file hashes, excluding itself; the Release SHA256SUMS covers downloadable assets.
+
+This release retains a two-minute App-created bootstrap window. A page-scoped replacement was discussed but is not implemented. No downloaded Python companion or external privilege-manager app is required for the current user connection flow.

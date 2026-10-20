@@ -27,8 +27,9 @@ public final class MainActivity extends Activity {
   private boolean restoreDetailAfterRead;
   private boolean recoveryReconnectNeeded,recoveryBootstrap;
   private final java.util.ArrayList<String> recentResults = new java.util.ArrayList<>();
-  private static final int QR = 40, IMAGE = 41;
+  private static final int QR = 40, IMAGE = 41, DIAGNOSTIC_EXPORT = 42;
   private static final ExecutorService WORK = Executors.newSingleThreadExecutor();
+  private static final ExecutorService DIAGNOSTIC_WORK = Executors.newSingleThreadExecutor();
   private static final UiOperationState OPERATIONS = new UiOperationState();
   private IProfileService backend;
   private boolean directManagement;
@@ -89,12 +90,22 @@ public final class MainActivity extends Activity {
         long remaining=connectionDeadline-android.os.SystemClock.elapsedRealtime();
         if(connectionCountdown!=null)connectionCountdown.setText(countdown(remaining));
         if(!connectionExpired && remaining<=0){
-          connectionExpired=true;statusPreservingOutcome(s(R.string.ui_connection_window_expired),s(R.string.ui_tap_start_connection_again_then_rerun_the_same_command));render();
+          connectionExpired=true;
+          compatibilityFailure(CompatibilityDiagnostics.Stage.BOOTSTRAP,
+              CompatibilityDiagnostics.Failure.BOOTSTRAP_TIMEOUT);
+          statusPreservingOutcome(s(R.string.ui_connection_window_expired),s(R.string.ui_tap_start_connection_again_then_rerun_the_same_command));
+          render();
         } else if(!connectionExpired){
           String feedback=CompanionBinderProvider.bootstrapFeedback();
           if(!feedback.isEmpty()&&!feedback.equals(connectionFeedback)){
             connectionFeedback=feedback;
+            if (!"STARTING".equals(feedback)) compatibilityFailure(
+                CompatibilityDiagnostics.Stage.BOOTSTRAP,
+                ("APP_CHANGED".equals(feedback) || "WINDOW_CHANGED".equals(feedback))
+                    ? CompatibilityDiagnostics.Failure.BINDER_HANDSHAKE_FAILED
+                    : CompatibilityDiagnostics.Failure.BOOTSTRAP_INCOMPLETE);
             statusPreservingOutcome("STARTING".equals(feedback)?s(R.string.ui_starting_local_service):s(R.string.ui_connection_not_completed),UiMessages.known(MainActivity.this,ConnectionFeedback.message(feedback)));
+            if (!"STARTING".equals(feedback)) render();
           }
         }
       }
@@ -114,6 +125,7 @@ public final class MainActivity extends Activity {
     getWindow().setNavigationBarColor(BG);
     if (saved != null)
       screen = saved.getInt("screen", 0) == 2 ? 2 : 0;
+    SafeDiagnosticBundle.mark(SafeDiagnosticBundle.Step.APP_STARTED);
     if (getPreferences(0).getBoolean("pending", false))
       notice = s(R.string.ui_card_and_operation_state_need_verification_open_settings_verify);
     render();
@@ -147,16 +159,16 @@ public final class MainActivity extends Activity {
     super.onConfigurationChanged(config);
   }
   private String canonicalTitle(){
-    if(title.equals(s(R.string.ui_card_connected)))return "Card connected";
-    if(title.equals(s(R.string.ui_check_complete)))return "Check complete";
-    if(title.equals(s(R.string.ui_card_selected)))return "Card selected";
-    if(title.equals(s(R.string.ui_connected)))return "Connected";
+    if(title.equals(s(R.string.ui_card_connected)))return s(R.string.ui_card_connected);
+    if(title.equals(s(R.string.ui_check_complete)))return s(R.string.ui_check_complete);
+    if(title.equals(s(R.string.ui_card_selected)))return s(R.string.ui_card_selected);
+    if(title.equals(s(R.string.ui_connected)))return s(R.string.ui_connected);
     return title;
   }
   private String operationLabel(String op){return switch(op){
-    case "switch", "enable" -> s(R.string.operation_switch);case "disable" -> s(R.string.operation_disable);
-    case "rename" -> s(R.string.operation_rename);case "delete" -> s(R.string.operation_delete);
-    case "download" -> s(R.string.operation_download);case "cleanup" -> s(R.string.operation_cleanup);
+    case "switch", "enable" -> s(R.string.operation_switch);case s(R.string.operation_disable) -> s(R.string.operation_disable);
+    case s(R.string.operation_rename) -> s(R.string.operation_rename);case s(R.string.operation_delete) -> s(R.string.operation_delete);
+    case s(R.string.operation_download) -> s(R.string.operation_download);case "cleanup" -> s(R.string.operation_cleanup);
     default -> op;
   };}
   private String countdown(long millis){long seconds=Math.max(0,(millis+999)/1000);return seconds==0?s(R.string.ui_connection_window_expired):s(R.string.connection_countdown,String.format(java.util.Locale.ROOT,"%d:%02d",seconds/60,seconds%60));}
@@ -186,17 +198,29 @@ public final class MainActivity extends Activity {
       service.asBinder().linkToDeath(()->runOnUiThread(()->{
         if(backend!=service)return;
         backend=null;compatibility=new JSONObject();navigationSession++;clearDetailSelection();
+        compatibilityFailure(CompatibilityDiagnostics.Stage.BINDER,
+            CompatibilityDiagnostics.Failure.SERVICE_DISCONNECTED);
         statusPreservingOutcome(s(R.string.ui_connection_lost), s(R.string.ui_start_the_computer_connection_again_pending_operations_will_not));render();
       }),0);
       backend=service;directManagement=true;companionManagement=true;fallback=false;
       recoveryBootstrap=false;
+      CompatibilityDiagnostics.ready(CompatibilityDiagnostics.Transport.ADB_COMPANION);
       if(bootstrapSheet!=null){bootstrapSheet.dismiss();bootstrapSheet=null;}
       if(screen==6)screen=0;
       status(s(R.string.ui_connected), s(R.string.ui_checking_card_and_recovery_state));render();checkRecovery();
-    }catch(Exception unavailable){backend=null;compatibility=new JSONObject();}
+    }catch(Exception unavailable){
+      backend=null;compatibility=new JSONObject();
+      compatibilityFailure(CompatibilityDiagnostics.Stage.BINDER,
+          CompatibilityDiagnostics.Failure.BINDER_HANDSHAKE_FAILED);
+    }
   }
   private void beginDirectBootstrap() {
-    if (!managementUnavailable().isEmpty()) { status(s(R.string.ui_device_not_supported_by_this_build), managementUnavailable());return; }
+    if (!managementUnavailable().isEmpty()) {
+      compatibilityFailure(CompatibilityDiagnostics.Stage.BOOTSTRAP,
+          CompatibilityDiagnostics.Failure.DEVICE_UNSUPPORTED);
+      status(s(R.string.ui_device_not_supported_by_this_build), managementUnavailable());render();
+      return;
+    }
     if(OPERATIONS.running()){status(s(R.string.ui_operation_in_progress), s(R.string.ui_wait_for_verification_before_changing_connection));return;}
     boolean recovering=recoveryReconnectNeeded&&backend!=null;
     try {if(recovering)CompanionBinderProvider.beginManagementRecoveryBootstrap();else CompanionBinderProvider.beginManagementBootstrap();}
@@ -208,6 +232,7 @@ public final class MainActivity extends Activity {
 
     try { connectionCommand=ConnectionCommand.forApk(getApplicationInfo().sourceDir); }
     catch(IllegalArgumentException invalid){status(s(R.string.ui_command_unavailable),s(R.string.ui_reinstall_the_verified_apk_before_connecting));render();return;}
+    CompatibilityDiagnostics.started(CompatibilityDiagnostics.Transport.ADB_COMPANION);
     connectionDeadline=android.os.SystemClock.elapsedRealtime()+120000;connectionExpired=false;connectionFeedback="";statusPreservingOutcome(s(R.string.ui_waiting_for_computer),s(R.string.ui_copy_the_command_below_and_run_it_within_two_minutes));screen=6;render();
   }
 
@@ -247,14 +272,16 @@ public final class MainActivity extends Activity {
             : label.equals(s(R.string.ui_reading_qr_image)) ? s(R.string.ui_decoding_the_image_on_this_phone_no_card_changes) : s(R.string.ui_reading_and_checking_your_card_no_changes_are_being_made));
     WORK.execute(() -> {
       JSONObject value = null;
-      boolean failed = false;
+      boolean failed = false, permissionDenied = false;
       try {
         value = job.run();
       } catch (Throwable e) {
         failed = true;
+        permissionDenied = e instanceof SecurityException; // never read the exception message
       }
       final JSONObject result = value;
       final boolean error = failed;
+      final boolean denied = permissionDenied;
       handler.post(() -> {
         boolean handleResult = !destroyed && resumed;
         OPERATIONS.finish(ticket, handleResult);
@@ -270,6 +297,10 @@ public final class MainActivity extends Activity {
               : s(R.string.ui_could_not_complete_the_check_reconnect_and_try_a_read_only_refre);
           if (mutation)
             notice = message;
+          if (!mutation && label.equals(s(R.string.ui_reading_your_esims)))
+            compatibilityFailure(CompatibilityDiagnostics.Stage.INVENTORY,
+                denied ? CompatibilityDiagnostics.Failure.INVENTORY_ACCESS_DENIED
+                       : CompatibilityDiagnostics.Failure.INVENTORY_READ_FAILED);
           status(mutation ? s(R.string.ui_needs_verification) : s(R.string.ui_check_unavailable), message);
           render();
           return;
@@ -334,10 +365,13 @@ public final class MainActivity extends Activity {
         r -> {
           if (r.optBoolean("transportUnavailable", false)) {
             // A missing legacy socket must not change connection modes or replay an operation.
+            compatibilityFailure(CompatibilityDiagnostics.Stage.SERVICE,
+                CompatibilityDiagnostics.Failure.COMPANION_UNAVAILABLE);
             status(s(R.string.ui_companion_unavailable),
                 s(R.string.ui_use_connect_using_computer_and_copy_and_run_the_adb_command_show));
             return;
           }
+          CompatibilityDiagnostics.ready(CompatibilityDiagnostics.Transport.ADB_COMPANION);
           fallback = true;
           companionManagement = r.optBoolean("generic", false);
           backend = companionManagement ? new CompanionProfileBackend() : null;
@@ -369,6 +403,8 @@ public final class MainActivity extends Activity {
         () -> s != null ? new JSONObject(s.listProfiles()) : ShellCompanionClient.list(), r -> {
           compatibility=r.optJSONObject("compatibility")==null?new JSONObject():r.optJSONObject("compatibility");
           if (!r.optBoolean("ok", true)) {
+            compatibilityFailure(CompatibilityDiagnostics.Stage.INVENTORY,
+                CompatibilityDiagnostics.Failure.INVENTORY_READ_FAILED);
             inventory=new JSONObject();notificationCleanupAvailable=false;clearDetailSelection();
             if(!r.optString("recoveryError").isEmpty()){
               recoveryReconnectNeeded=true;
@@ -409,6 +445,8 @@ public final class MainActivity extends Activity {
           inventory=new JSONObject();notificationCleanupAvailable=false;clearDetailSelection();
           statusPreservingOutcome(s(R.string.ui_choose_a_card),s(R.string.ui_more_than_one_euicc_is_readable_select_the_card_you_want_to_mana));render();return;
         }
+        compatibilityFailure(CompatibilityDiagnostics.Stage.INVENTORY,
+            CompatibilityDiagnostics.Failure.INVENTORY_READ_FAILED);
         getPreferences(0).edit().putBoolean("pending", true).commit();
         inventory = new JSONObject();notificationCleanupAvailable = false;clearDetailSelection();
         String limitation=UiMessages.known(MainActivity.this,SecureElementFailure.message(r.optString("capabilityError", "")));
@@ -470,8 +508,8 @@ public final class MainActivity extends Activity {
     run(s(R.string.ui_reviewing) + operationLabel(op), false,
         ()
             -> new JSONObject(op.equals("switch") ? s.prepareSwitch(index)
-                    : op.equals("rename")         ? s.prepareRename(index, nickname)
-                    : op.equals("delete")         ? s.prepareDelete(index)
+                    : op.equals(s(R.string.operation_rename))         ? s.prepareRename(index, nickname)
+                    : op.equals(s(R.string.operation_delete))         ? s.prepareDelete(index)
                                                   : s.prepareDisable(index)),
         r -> {
           if (previewSession != navigationSession || inventory != previewInventory || backend != s) return;
@@ -497,10 +535,10 @@ public final class MainActivity extends Activity {
           String warning = s(R.string.ui_this_permanently_removes_the_selected_profile_from_this_card_its);
           status(s(R.string.ui_review_deletion), s(R.string.ui_check_the_selected_card_and_profile_before_deleting));
           final boolean[] confirmed = {false};
-          Sheet preview = new Sheet(op.equals("switch") ? s(R.string.ui_activate_esim) : op.equals("delete") ? s(R.string.ui_delete_esim) : op.equals("disable") ? s(R.string.ui_disable_esim) : s(R.string.ui_save_nickname));
+          Sheet preview = new Sheet(op.equals("switch") ? s(R.string.ui_activate_esim) : op.equals(s(R.string.operation_delete)) ? s(R.string.ui_delete_esim) : op.equals(s(R.string.operation_disable)) ? s(R.string.ui_disable_esim) : s(R.string.ui_save_nickname));
           if (op.equals("switch")) preview.fact(s(R.string.ui_currently_enabled), r.optString("from", "").isEmpty() ? s(R.string.ui_none_on_this_card) : r.optString("from"));
           preview.fact(s(R.string.ui_selected_esim), r.optString("to", s(R.string.ui_selected_esim)));preview.copy(warning);
-          preview.button(op.equals("delete") ? s(R.string.ui_delete_permanently) : op.equals("switch") ? s(R.string.ui_activate_once) : op.equals("disable") ? s(R.string.ui_disable_once) : s(R.string.ui_save_nickname_79), true, () -> {
+          preview.button(op.equals(s(R.string.operation_delete)) ? s(R.string.ui_delete_permanently) : op.equals("switch") ? s(R.string.ui_activate_once) : op.equals(s(R.string.operation_disable)) ? s(R.string.ui_disable_once) : s(R.string.ui_save_nickname_79), true, () -> {
             confirmed[0] = true;preview.dialog.dismiss();execute(s, token, op);
           });
           preview.button(s(R.string.ui_cancel), false, preview.dialog::dismiss);
@@ -512,10 +550,10 @@ public final class MainActivity extends Activity {
       status(s(R.string.ui_connection_changed), s(R.string.ui_no_action_submitted_reconnect_and_prepare_a_new_preview));
       return;
     }
-    run(op.equals("download") ? s(R.string.ui_installing_and_verifying) : s(R.string.ui_applying) + operationLabel(op), true,
+    run(op.equals(s(R.string.operation_download)) ? s(R.string.ui_installing_and_verifying) : s(R.string.ui_applying) + operationLabel(op), true,
         ()
             -> new JSONObject(op.equals("switch") ? s.executeSwitch(token)
-                    : op.equals("download")       ? s.executeDownload(token)
+                    : op.equals(s(R.string.operation_download))       ? s.executeDownload(token)
                                                   : s.executeOperation(token)),
         r -> {
           if (r.has("notificationStatus")) {
@@ -527,7 +565,7 @@ public final class MainActivity extends Activity {
               || (r.optBoolean("installed", false)
                   && "installed_disabled".equals(r.optString("status")));
           boolean review = r.optBoolean("reviewRequired", !verified);
-          if (op.equals("download")) {
+          if (op.equals(s(R.string.operation_download))) {
             verified = InstallResultPolicy.verified(r.optString("status"),
                 r.isNull("installed") ? null : r.optBoolean("installed", false),
                 r.isNull("enabled") ? null : r.optBoolean("enabled", true),
@@ -535,7 +573,7 @@ public final class MainActivity extends Activity {
             review = review || !verified;
           }
           notice = verified && !review
-              ? (op.equals("download")
+              ? (op.equals(s(R.string.operation_download))
                         ? s(R.string.ui_esim_installed_and_independently_verified_it_remains_disabled_yo)
                         : s(R.string.ui_operation_verified_by_a_fresh_card_read_review_the_updated_inven))
               : s(R.string.ui_operation_requires_review_verify_the_card_before_any_further_act);
@@ -562,7 +600,7 @@ public final class MainActivity extends Activity {
           screen = restoreDetailAfterRead ? 3 : 0;
           render();
           refresh();
-          if (op.equals("download") && verified && !review) showInstalledResult();
+          if (op.equals(s(R.string.operation_download)) && verified && !review) showInstalledResult();
         });
   }
   private void showInstalledResult() {
@@ -629,7 +667,7 @@ public final class MainActivity extends Activity {
           preview.copy(s(R.string.ui_the_new_esim_stays_disabled_existing_profiles_keep_their_current));
           preview.copy(s(R.string.ui_the_operator_may_consume_this_code_installation_is_attempted_onc));
           preview.button(s(R.string.ui_install_once), true, () -> {
-            confirmed[0] = true;preview.dialog.dismiss();clearCredentials();execute(s, token, "download");
+            confirmed[0] = true;preview.dialog.dismiss();clearCredentials();execute(s, token, s(R.string.operation_download));
           });
           preview.button(s(R.string.ui_cancel), false, preview.dialog::dismiss);
           preview.dialog.setOnDismissListener(d -> { if (!confirmed[0]) status(s(R.string.ui_installation_cancelled), s(R.string.ui_no_download_started_no_changes_were_made)); });preview.show();
@@ -767,19 +805,19 @@ public final class MainActivity extends Activity {
     toggle.setThumbTintList(android.content.res.ColorStateList.valueOf(darkTheme?0xffffdbcC:Color.WHITE));toggle.setTrackTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{ACCENT,MUTED}));
     boolean canEdit=backend!=null&&inventory.optBoolean("writeQualified",false)&&!getPreferences(0).getBoolean("pending",false);
     availability(toggle,canEdit&&((enabled&&p.optBoolean("canDisable",false))||(disabled&&p.optBoolean("canEnable",false))));taskControls.add(toggle);
-    toggle.setOnClickListener(button->{toggle.setChecked(enabled);if(detailCurrent())prepare(enabled?"disable":"switch",selectedProfile,"");});add(toggle,28);
+    toggle.setOnClickListener(button->{toggle.setChecked(enabled);if(detailCurrent())prepare(enabled?s(R.string.operation_disable):"switch",selectedProfile,"");});add(toggle,28);
     add(text(enabled?s(R.string.ui_enabled_on_this_card):disabled?s(R.string.ui_off_turn_on_to_use_this_esim):s(R.string.ui_state_unknown_refresh_before_making_changes)),14);
     String active="";JSONArray rows=inventory.optJSONArray("profiles");if(rows!=null)for(int i=0;i<rows.length();i++){JSONObject other=rows.optJSONObject(i);if(other!=null&&"enabled".equalsIgnoreCase(other.optString("state")))active=profileName(other);}
     add(text(enabled?s(R.string.ui_turning_this_off_leaves_no_esim_enabled_on_this_card):active.isEmpty()?s(R.string.ui_turning_this_on_enables_this_esim_on_this_card):s(R.string.profile_switch_replaces,active),13,MUTED,false),6);
     Button rename=action(s(R.string.ui_rename),false,()->{if(detailCurrent()){screen=4;navigationSession++;render();}});availability(rename,canEdit&&p.optBoolean("canRename",false));add(rename,28);
-    Button delete=action(s(R.string.ui_delete_esim_166),false,()->{if(detailCurrent())prepare("delete",selectedProfile,"");});delete.setTextColor(ERROR);availability(delete,canEdit&&disabled&&p.optBoolean("canDelete",false));add(delete,12);
+    Button delete=action(s(R.string.ui_delete_esim_166),false,()->{if(detailCurrent())prepare(s(R.string.operation_delete),selectedProfile,"");});delete.setTextColor(ERROR);availability(delete,canEdit&&disabled&&p.optBoolean("canDelete",false));add(delete,12);
     if(enabled)add(text(s(R.string.ui_turn_off_this_esim_before_deleting_it),12,MUTED,false),4);
     if(!canEdit)add(text(s(R.string.ui_changes_are_unavailable_until_this_card_and_its_recovery_state_a),13,MUTED,false),12);
     add(text(s(R.string.ui_about_this_esim),16,TEXT,true),28);detailFact(s(R.string.ui_operator),p.optString("provider",p.optString("name",s(R.string.ui_not_reported))));detailFact("ICCID",selectedIccid);detailFact(s(R.string.ui_card),cardLabel());
     add(text(s(R.string.ui_card_state_only_network_service_has_not_been_checked),12,MUTED,false),20);
   }
   private void detailFact(String label,String value){LinearLayout row=new LinearLayout(this);row.setPadding(0,dp(14),0,dp(14));row.addView(text(label,13,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));TextView v=text(mask(value),13,TEXT,false);v.setGravity(Gravity.END);row.addView(v,new LinearLayout.LayoutParams(0,-2,2));add(row,0);addDivider();}
-  private void renameScreen(){if(detailProfile==null)return;add(text(cardLabel()+s(R.string.ui_eid_156)+inventory.optString("eidMasked",s(R.string.ui_not_reported)),12,MUTED,false),18);add(text(profileName(detailProfile)+" · "+selectedIccid),22);EditText name=input(s(R.string.ui_nickname),false);name.setText(detailProfile.optString("nickname",""));add(name,22);add(text(s(R.string.ui_leave_blank_to_use_the_operator_name),12,MUTED,false),10);add(action(s(R.string.ui_save),true,()->{if(!detailCurrent())return;String value=name.getText().toString().trim();if(value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>64||value.matches("(?s).*[\\p{Cntrl}].*")){name.setError(s(R.string.ui_use_at_most_64_utf_8_bytes_without_control_characters));return;}hideKeyboard();prepare("rename",selectedProfile,value);}),28);add(action(s(R.string.ui_cancel),false,()->{screen=3;navigationSession++;render();}),8);}
+  private void renameScreen(){if(detailProfile==null)return;add(text(cardLabel()+s(R.string.ui_eid_156)+inventory.optString("eidMasked",s(R.string.ui_not_reported)),12,MUTED,false),18);add(text(profileName(detailProfile)+" · "+selectedIccid),22);EditText name=input(s(R.string.ui_nickname),false);name.setText(detailProfile.optString("nickname",""));add(name,22);add(text(s(R.string.ui_leave_blank_to_use_the_operator_name),12,MUTED,false),10);add(action(s(R.string.ui_save),true,()->{if(!detailCurrent())return;String value=name.getText().toString().trim();if(value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>64||value.matches("(?s).*[\\p{Cntrl}].*")){name.setError(s(R.string.ui_use_at_most_64_utf_8_bytes_without_control_characters));return;}hideKeyboard();prepare(s(R.string.operation_rename),selectedProfile,value);}),28);add(action(s(R.string.ui_cancel),false,()->{screen=3;navigationSession++;render();}),8);}
   private void recordsScreen(){add(text(s(R.string.ui_operation_results),22,TEXT,false),24);add(text(s(R.string.ui_this_session_s_results_are_shown_here_durable_safety_records_rem)),12);for(String value:recentResults)add(text(value,16,TEXT,false),18);if(recentResults.isEmpty())add(text(s(R.string.ui_no_operations_in_this_app_session)),24);add(action(s(R.string.ui_verify_card_and_recovery),false,this::reconcile),24);add(action(s(R.string.ui_export_safe_diagnostics),false,this::exportDiagnostics),12);}
   private void connectionScreen(){
     add(text(s(R.string.ui_connect_with_adb),28,TEXT,false),28);
@@ -798,6 +836,14 @@ public final class MainActivity extends Activity {
       statusPreservingOutcome(s(R.string.ui_command_copied),s(R.string.ui_run_it_while_the_timer_is_active_your_computer_will_confirm_the));
     });availability(copy,!connectionExpired);add(copy,18);
     add(action(s(R.string.ui_start_connection_again),connectionExpired,this::beginDirectBootstrap),8);
+    add(action(connectionExpired || CompatibilityDiagnostics.lastFailure()!=null
+        ? s(R.string.ui_feedback_0) : s(R.string.ui_feedback_1),
+        false, () -> {
+          if (CompatibilityDiagnostics.lastFailure()==null)
+            compatibilityFailure(CompatibilityDiagnostics.Stage.BOOTSTRAP,
+                CompatibilityDiagnostics.Failure.BOOTSTRAP_INCOMPLETE);
+          offerCompatibilityReport();
+        }),12);
     add(text(s(R.string.ui_the_command_stays_the_same_after_app_updates_with_several_phones),12,MUTED,false),16);
     add(text(s(R.string.ui_3_wait_for_connection_confirmation),18,TEXT,true),24);
     add(text(s(R.string.ui_your_computer_must_say_8bercue_connected_or_already_connected_th)),10);
@@ -970,6 +1016,8 @@ public final class MainActivity extends Activity {
     if (LabSupport.socketEligible())
       add(action(s(R.string.ui_use_legacy_local_companion), useCompanion(), this::selectLegacyCompanion), 12);
     add(action(s(R.string.ui_connect_using_computer), backend==null, this::beginDirectBootstrap), 12);
+    if (CompatibilityDiagnostics.lastFailure()!=null)
+      add(action(s(R.string.ui_feedback_2),false,this::offerCompatibilityReport),12);
     if (BuildConfig.DEBUG) add(action(s(R.string.ui_check_direct_binder_companion_read_only), false, () -> {
       run(s(R.string.ui_checking_local_binder), false, () -> {
         ICompanionProbe probe = CompanionBinderProvider.service();
@@ -1078,6 +1126,13 @@ public final class MainActivity extends Activity {
       advanced.copy(s(R.string.ui_diagnostics_exclude_activation_codes_profile_names_identifiers_a));
       advanced.button(s(R.string.ui_done), false, advanced.dialog::dismiss);advanced.show();
     }), 24);
+    add(action(s(R.string.ui_feedback_3),false,this::reportProblem),16);
+    add(action(s(R.string.ui_feedback_4),false,this::saveDiagnosticZip),12);
+    add(action(s(R.string.ui_feedback_5) + (SafeTelemetry.allowed(this) ? s(R.string.ui_feedback_6) : s(R.string.ui_feedback_7)) + "  ›",
+        false, this::chooseCrashReporting), 12);
+    if (BuildConfig.DEBUG) add(action(s(R.string.ui_feedback_8),false,
+        () -> status(SafeTelemetry.smoke(this) ? s(R.string.ui_feedback_9) : s(R.string.ui_feedback_10),
+            s(R.string.ui_feedback_11))), 12);
     add(action(s(R.string.ui_privacy_information), false, () -> showBundledText(s(R.string.ui_privacy_information), "legal/privacy.txt")), 20);
     add(action(s(R.string.ui_third_party_notices), false, () -> showBundledText(s(R.string.ui_third_party_notices), "legal/third-party-notices.txt")), 12);
     add(text(s(R.string.ui_independent_project_not_an_official_5ber_product), 12, MUTED, false), 20);
@@ -1161,6 +1216,115 @@ public final class MainActivity extends Activity {
         "freeNonvolatileMemoryBytes", cardInfo.optLong("freeNonvolatileBytes", -1));
     return bytes >= 0 ? (bytes / 1024) + s(R.string.ui_kb_available) : s(R.string.ui_not_reported);
   }
+  private void compatibilityFailure(CompatibilityDiagnostics.Stage stage,
+      CompatibilityDiagnostics.Failure reason) {
+    CompatibilityDiagnostics.failed(CompatibilityDiagnostics.Transport.ADB_COMPANION,stage,reason);
+    SafeDiagnosticBundle.mark(SafeDiagnosticBundle.Step.CONNECTION_UNAVAILABLE);
+  }
+
+  private void chooseCrashReporting() {
+    boolean enabled = SafeTelemetry.allowed(this);
+    new AlertDialog.Builder(this)
+        .setTitle(s(R.string.ui_feedback_12))
+        .setMessage(s(R.string.ui_feedback_13))
+        .setNegativeButton(s(R.string.ui_feedback_14), null)
+        .setPositiveButton(enabled ? s(R.string.ui_feedback_15) : s(R.string.ui_feedback_16), (dialog, which) -> {
+          SafeTelemetry.setAllowed(this, !enabled);
+          render();
+        }).show();
+  }
+
+  private void reportProblem() { reportProblem(null); }
+
+  private void reportProblem(CompatibilityDiagnostics.Snapshot context) {
+    SafeDiagnosticBundle.mark(SafeDiagnosticBundle.Step.REPORT_OPENED);
+    final EditText message = new EditText(this);
+    message.setHint(s(R.string.ui_feedback_17));
+    message.setMinLines(3);
+    message.setMaxLines(7);
+    message.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+    new AlertDialog.Builder(this).setTitle(s(R.string.ui_feedback_18))
+        .setMessage(s(R.string.ui_feedback_19))
+        .setView(message).setNegativeButton(s(R.string.ui_feedback_14), null)
+        .setPositiveButton(s(R.string.ui_feedback_20), (dialog, ignored) -> {
+          String body = message.getText().toString().trim();
+          if (body.length() == 0) {
+            status(s(R.string.ui_feedback_21), s(R.string.ui_feedback_22));return;
+          }
+          if (body.length() > 4000) body = body.substring(0, 4000);
+          Intent share = new Intent(Intent.ACTION_SEND);
+          share.setType("text/plain");
+          share.putExtra(Intent.EXTRA_SUBJECT, "8bercue bug report");
+          share.putExtra(Intent.EXTRA_TEXT, "Issue description (user-supplied; review before sending):\n" + body
+             + "\n\n" + SafeDiagnosticBundle.summary(BuildConfig.VERSION_NAME,
+                 BuildConfig.VERSION_CODE, Build.VERSION.SDK_INT, Build.MODEL,
+                 backend != null, getPreferences(0).getBoolean("pending", false))
+             + (context == null ? "" : "\nCompatibility diagnosis (reviewed by user):\n" + context.summary()));
+          Intent email = new Intent(Intent.ACTION_SENDTO);
+          email.setData(android.net.Uri.parse("mailto:support@sidnvy.com"));
+          email.putExtra(Intent.EXTRA_SUBJECT, "8bercue bug report");
+          email.putExtra(Intent.EXTRA_TEXT, share.getStringExtra(Intent.EXTRA_TEXT));
+          try {
+            startActivity(email);
+          } catch (android.content.ActivityNotFoundException noEmailApp) {
+            startActivity(Intent.createChooser(share, s(R.string.ui_feedback_23)));
+          }
+        }).show();
+  }
+  private void offerCompatibilityReport() {
+    final CompatibilityDiagnostics.Snapshot result=CompatibilityDiagnostics.lastFailure();
+    if (result == null) {
+      reportProblem();
+      return;
+    }
+    new AlertDialog.Builder(this).setTitle(s(R.string.ui_feedback_24))
+        .setMessage(s(R.string.ui_feedback_25)
+            + result.summary()
+            + s(R.string.ui_feedback_26))
+        .setNeutralButton(s(R.string.ui_feedback_27), (d,w) -> reportProblem(result))
+        .setNegativeButton(s(R.string.ui_feedback_28), null)
+        .setPositiveButton(s(R.string.ui_feedback_29), (d,w) -> {
+          if (!SafeTelemetry.configured(this)) {
+            status(s(R.string.ui_feedback_30), s(R.string.ui_feedback_31));
+            return;
+          }
+          DIAGNOSTIC_WORK.execute(() -> {
+            boolean queued=SafeTelemetry.submitCompatibility(getApplicationContext(),result);
+            runOnUiThread(() -> {
+              if (destroyed) return;
+              status(queued ? s(R.string.ui_feedback_32) : s(R.string.ui_feedback_33),
+                  queued ? s(R.string.ui_feedback_34)
+                      : s(R.string.ui_feedback_35));
+            });
+          });
+        }).show();
+  }
+
+  private void saveDiagnosticZip() {
+    SafeDiagnosticBundle.mark(SafeDiagnosticBundle.Step.ZIP_REQUESTED);
+    new AlertDialog.Builder(this).setTitle(s(R.string.ui_feedback_36))
+        .setMessage(s(R.string.ui_feedback_37))
+        .setNegativeButton(s(R.string.ui_feedback_14), null)
+        .setPositiveButton(s(R.string.ui_feedback_38), (dialog, which) -> {
+          Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+          create.addCategory(Intent.CATEGORY_OPENABLE);
+          create.setType("application/zip");
+          create.putExtra(Intent.EXTRA_TITLE, "8bercue-diagnostics.zip");
+          startActivityForResult(create, DIAGNOSTIC_EXPORT);
+        }).show();
+  }
+  private void writeDiagnosticZip(android.net.Uri uri) {
+    try (java.io.OutputStream stream = getContentResolver().openOutputStream(uri)) {
+      if (stream == null) throw new java.io.IOException("No document output");
+      SafeDiagnosticBundle.write(stream, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE,
+          Build.VERSION.SDK_INT, Build.MODEL, backend != null,
+          getPreferences(0).getBoolean("pending", false));
+      SafeDiagnosticBundle.mark(SafeDiagnosticBundle.Step.ZIP_SAVED);
+      status(s(R.string.ui_feedback_39), s(R.string.ui_feedback_40));
+    } catch (java.io.IOException error) {
+      status(s(R.string.ui_feedback_41), s(R.string.ui_feedback_42));
+    }
+  }
   private void exportDiagnostics() {
     String report = "8bercue " + BuildConfig.VERSION_NAME + "\nAndroid API "
         + Build.VERSION.SDK_INT + "\nManagement connection: " + (backend == null ? "none" : directManagement ? "independent Binder" : companionManagement ? "Shell socket" : "local Binder")
@@ -1182,7 +1346,9 @@ public final class MainActivity extends Activity {
     super.onActivityResult(request, result, data);
     if (result != RESULT_OK || data == null)
       return;
-    if (request == QR) {
+    if (request == DIAGNOSTIC_EXPORT && data.getData()!=null) {
+      writeDiagnosticZip(data.getData());
+    } else if (request == QR) {
       setCode(data.getStringExtra("activation"));
     } else if (request == IMAGE && data.getData() != null) {
       pendingImport = data.getData();

@@ -34,3 +34,9 @@ check([n.attrib[ns+'name'] for n in locales]==['en','zh-Hans'],'Supported per-ap
 check('legal/privacy-zh-Hans.txt' in (java/'MainActivity.java').read_text(),'Chinese privacy page is selected explicitly')
 check((root/'app/src/main/assets/legal/privacy-zh-Hans.txt').stat().st_size>1000,'Complete local translated privacy document')
 print(f'PASS {checks} localization resource/placeholder/error coverage assertions ({len(en)} bilingual strings; offline only)')
+
+# Protocol operation IDs must never be translated when dispatching writes.
+ui=(java/"MainActivity.java").read_text()
+nonlabels=re.sub(r"private String operationLabel\(String op\).*?private String countdown", "private String countdown", ui, flags=re.S)
+assert "s(R.string.operation_" not in nonlabels, "Localized operation ID entered protocol dispatch"
+assert 'return "Card connected"' in ui, "Canonical status key must remain independent of locale"

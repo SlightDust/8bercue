@@ -1,4 +1,4 @@
-# Privacy-first bug reporting (feature branch, not released)
+# Privacy-first bug reporting (0.19.1 Beta)
 
 Based on the published 0.19.0-beta.1 application code; does not change the
 authenticated ADB command, eUICC operation authorization, or profile write path.
@@ -21,5 +21,5 @@ authenticated ADB command, eUICC operation authorization, or profile write path.
 - Test with \`JAVA_HOME\`, \`ANDROID_HOME\`: Android Release build + Lint Release,
   existing UI/ADB/compatibility offline tests, and release surface validation.
 
-**Non-goals:** Google Play release, publishing, signing, device data collection,
+**Non-goals:** Google Play release, automatic device data collection,
 hardware eUICC write/switch tests, retroactive changes to a published Beta tag.

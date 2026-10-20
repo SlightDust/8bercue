@@ -159,16 +159,16 @@ public final class MainActivity extends Activity {
     super.onConfigurationChanged(config);
   }
   private String canonicalTitle(){
-    if(title.equals(s(R.string.ui_card_connected)))return s(R.string.ui_card_connected);
-    if(title.equals(s(R.string.ui_check_complete)))return s(R.string.ui_check_complete);
-    if(title.equals(s(R.string.ui_card_selected)))return s(R.string.ui_card_selected);
-    if(title.equals(s(R.string.ui_connected)))return s(R.string.ui_connected);
+    if(title.equals(s(R.string.ui_card_connected)))return "Card connected";
+    if(title.equals(s(R.string.ui_check_complete)))return "Check complete";
+    if(title.equals(s(R.string.ui_card_selected)))return "Card selected";
+    if(title.equals(s(R.string.ui_connected)))return "Connected";
     return title;
   }
   private String operationLabel(String op){return switch(op){
-    case "switch", "enable" -> s(R.string.operation_switch);case s(R.string.operation_disable) -> s(R.string.operation_disable);
-    case s(R.string.operation_rename) -> s(R.string.operation_rename);case s(R.string.operation_delete) -> s(R.string.operation_delete);
-    case s(R.string.operation_download) -> s(R.string.operation_download);case "cleanup" -> s(R.string.operation_cleanup);
+    case "switch", "enable" -> s(R.string.operation_switch);case "disable" -> s(R.string.operation_disable);
+    case "rename" -> s(R.string.operation_rename);case "delete" -> s(R.string.operation_delete);
+    case "download" -> s(R.string.operation_download);case "cleanup" -> s(R.string.operation_cleanup);
     default -> op;
   };}
   private String countdown(long millis){long seconds=Math.max(0,(millis+999)/1000);return seconds==0?s(R.string.ui_connection_window_expired):s(R.string.connection_countdown,String.format(java.util.Locale.ROOT,"%d:%02d",seconds/60,seconds%60));}
@@ -508,8 +508,8 @@ public final class MainActivity extends Activity {
     run(s(R.string.ui_reviewing) + operationLabel(op), false,
         ()
             -> new JSONObject(op.equals("switch") ? s.prepareSwitch(index)
-                    : op.equals(s(R.string.operation_rename))         ? s.prepareRename(index, nickname)
-                    : op.equals(s(R.string.operation_delete))         ? s.prepareDelete(index)
+                    : op.equals("rename")         ? s.prepareRename(index, nickname)
+                    : op.equals("delete")         ? s.prepareDelete(index)
                                                   : s.prepareDisable(index)),
         r -> {
           if (previewSession != navigationSession || inventory != previewInventory || backend != s) return;
@@ -535,10 +535,10 @@ public final class MainActivity extends Activity {
           String warning = s(R.string.ui_this_permanently_removes_the_selected_profile_from_this_card_its);
           status(s(R.string.ui_review_deletion), s(R.string.ui_check_the_selected_card_and_profile_before_deleting));
           final boolean[] confirmed = {false};
-          Sheet preview = new Sheet(op.equals("switch") ? s(R.string.ui_activate_esim) : op.equals(s(R.string.operation_delete)) ? s(R.string.ui_delete_esim) : op.equals(s(R.string.operation_disable)) ? s(R.string.ui_disable_esim) : s(R.string.ui_save_nickname));
+          Sheet preview = new Sheet(op.equals("switch") ? s(R.string.ui_activate_esim) : op.equals("delete") ? s(R.string.ui_delete_esim) : op.equals("disable") ? s(R.string.ui_disable_esim) : s(R.string.ui_save_nickname));
           if (op.equals("switch")) preview.fact(s(R.string.ui_currently_enabled), r.optString("from", "").isEmpty() ? s(R.string.ui_none_on_this_card) : r.optString("from"));
           preview.fact(s(R.string.ui_selected_esim), r.optString("to", s(R.string.ui_selected_esim)));preview.copy(warning);
-          preview.button(op.equals(s(R.string.operation_delete)) ? s(R.string.ui_delete_permanently) : op.equals("switch") ? s(R.string.ui_activate_once) : op.equals(s(R.string.operation_disable)) ? s(R.string.ui_disable_once) : s(R.string.ui_save_nickname_79), true, () -> {
+          preview.button(op.equals("delete") ? s(R.string.ui_delete_permanently) : op.equals("switch") ? s(R.string.ui_activate_once) : op.equals("disable") ? s(R.string.ui_disable_once) : s(R.string.ui_save_nickname_79), true, () -> {
             confirmed[0] = true;preview.dialog.dismiss();execute(s, token, op);
           });
           preview.button(s(R.string.ui_cancel), false, preview.dialog::dismiss);
@@ -550,10 +550,10 @@ public final class MainActivity extends Activity {
       status(s(R.string.ui_connection_changed), s(R.string.ui_no_action_submitted_reconnect_and_prepare_a_new_preview));
       return;
     }
-    run(op.equals(s(R.string.operation_download)) ? s(R.string.ui_installing_and_verifying) : s(R.string.ui_applying) + operationLabel(op), true,
+    run(op.equals("download") ? s(R.string.ui_installing_and_verifying) : s(R.string.ui_applying) + operationLabel(op), true,
         ()
             -> new JSONObject(op.equals("switch") ? s.executeSwitch(token)
-                    : op.equals(s(R.string.operation_download))       ? s.executeDownload(token)
+                    : op.equals("download")       ? s.executeDownload(token)
                                                   : s.executeOperation(token)),
         r -> {
           if (r.has("notificationStatus")) {
@@ -565,7 +565,7 @@ public final class MainActivity extends Activity {
               || (r.optBoolean("installed", false)
                   && "installed_disabled".equals(r.optString("status")));
           boolean review = r.optBoolean("reviewRequired", !verified);
-          if (op.equals(s(R.string.operation_download))) {
+          if (op.equals("download")) {
             verified = InstallResultPolicy.verified(r.optString("status"),
                 r.isNull("installed") ? null : r.optBoolean("installed", false),
                 r.isNull("enabled") ? null : r.optBoolean("enabled", true),
@@ -573,7 +573,7 @@ public final class MainActivity extends Activity {
             review = review || !verified;
           }
           notice = verified && !review
-              ? (op.equals(s(R.string.operation_download))
+              ? (op.equals("download")
                         ? s(R.string.ui_esim_installed_and_independently_verified_it_remains_disabled_yo)
                         : s(R.string.ui_operation_verified_by_a_fresh_card_read_review_the_updated_inven))
               : s(R.string.ui_operation_requires_review_verify_the_card_before_any_further_act);
@@ -600,7 +600,7 @@ public final class MainActivity extends Activity {
           screen = restoreDetailAfterRead ? 3 : 0;
           render();
           refresh();
-          if (op.equals(s(R.string.operation_download)) && verified && !review) showInstalledResult();
+          if (op.equals("download") && verified && !review) showInstalledResult();
         });
   }
   private void showInstalledResult() {
@@ -667,7 +667,7 @@ public final class MainActivity extends Activity {
           preview.copy(s(R.string.ui_the_new_esim_stays_disabled_existing_profiles_keep_their_current));
           preview.copy(s(R.string.ui_the_operator_may_consume_this_code_installation_is_attempted_onc));
           preview.button(s(R.string.ui_install_once), true, () -> {
-            confirmed[0] = true;preview.dialog.dismiss();clearCredentials();execute(s, token, s(R.string.operation_download));
+            confirmed[0] = true;preview.dialog.dismiss();clearCredentials();execute(s, token, "download");
           });
           preview.button(s(R.string.ui_cancel), false, preview.dialog::dismiss);
           preview.dialog.setOnDismissListener(d -> { if (!confirmed[0]) status(s(R.string.ui_installation_cancelled), s(R.string.ui_no_download_started_no_changes_were_made)); });preview.show();
@@ -805,19 +805,19 @@ public final class MainActivity extends Activity {
     toggle.setThumbTintList(android.content.res.ColorStateList.valueOf(darkTheme?0xffffdbcC:Color.WHITE));toggle.setTrackTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[]{}},new int[]{ACCENT,MUTED}));
     boolean canEdit=backend!=null&&inventory.optBoolean("writeQualified",false)&&!getPreferences(0).getBoolean("pending",false);
     availability(toggle,canEdit&&((enabled&&p.optBoolean("canDisable",false))||(disabled&&p.optBoolean("canEnable",false))));taskControls.add(toggle);
-    toggle.setOnClickListener(button->{toggle.setChecked(enabled);if(detailCurrent())prepare(enabled?s(R.string.operation_disable):"switch",selectedProfile,"");});add(toggle,28);
+    toggle.setOnClickListener(button->{toggle.setChecked(enabled);if(detailCurrent())prepare(enabled?"disable":"switch",selectedProfile,"");});add(toggle,28);
     add(text(enabled?s(R.string.ui_enabled_on_this_card):disabled?s(R.string.ui_off_turn_on_to_use_this_esim):s(R.string.ui_state_unknown_refresh_before_making_changes)),14);
     String active="";JSONArray rows=inventory.optJSONArray("profiles");if(rows!=null)for(int i=0;i<rows.length();i++){JSONObject other=rows.optJSONObject(i);if(other!=null&&"enabled".equalsIgnoreCase(other.optString("state")))active=profileName(other);}
     add(text(enabled?s(R.string.ui_turning_this_off_leaves_no_esim_enabled_on_this_card):active.isEmpty()?s(R.string.ui_turning_this_on_enables_this_esim_on_this_card):s(R.string.profile_switch_replaces,active),13,MUTED,false),6);
     Button rename=action(s(R.string.ui_rename),false,()->{if(detailCurrent()){screen=4;navigationSession++;render();}});availability(rename,canEdit&&p.optBoolean("canRename",false));add(rename,28);
-    Button delete=action(s(R.string.ui_delete_esim_166),false,()->{if(detailCurrent())prepare(s(R.string.operation_delete),selectedProfile,"");});delete.setTextColor(ERROR);availability(delete,canEdit&&disabled&&p.optBoolean("canDelete",false));add(delete,12);
+    Button delete=action(s(R.string.ui_delete_esim_166),false,()->{if(detailCurrent())prepare("delete",selectedProfile,"");});delete.setTextColor(ERROR);availability(delete,canEdit&&disabled&&p.optBoolean("canDelete",false));add(delete,12);
     if(enabled)add(text(s(R.string.ui_turn_off_this_esim_before_deleting_it),12,MUTED,false),4);
     if(!canEdit)add(text(s(R.string.ui_changes_are_unavailable_until_this_card_and_its_recovery_state_a),13,MUTED,false),12);
     add(text(s(R.string.ui_about_this_esim),16,TEXT,true),28);detailFact(s(R.string.ui_operator),p.optString("provider",p.optString("name",s(R.string.ui_not_reported))));detailFact("ICCID",selectedIccid);detailFact(s(R.string.ui_card),cardLabel());
     add(text(s(R.string.ui_card_state_only_network_service_has_not_been_checked),12,MUTED,false),20);
   }
   private void detailFact(String label,String value){LinearLayout row=new LinearLayout(this);row.setPadding(0,dp(14),0,dp(14));row.addView(text(label,13,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));TextView v=text(mask(value),13,TEXT,false);v.setGravity(Gravity.END);row.addView(v,new LinearLayout.LayoutParams(0,-2,2));add(row,0);addDivider();}
-  private void renameScreen(){if(detailProfile==null)return;add(text(cardLabel()+s(R.string.ui_eid_156)+inventory.optString("eidMasked",s(R.string.ui_not_reported)),12,MUTED,false),18);add(text(profileName(detailProfile)+" · "+selectedIccid),22);EditText name=input(s(R.string.ui_nickname),false);name.setText(detailProfile.optString("nickname",""));add(name,22);add(text(s(R.string.ui_leave_blank_to_use_the_operator_name),12,MUTED,false),10);add(action(s(R.string.ui_save),true,()->{if(!detailCurrent())return;String value=name.getText().toString().trim();if(value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>64||value.matches("(?s).*[\\p{Cntrl}].*")){name.setError(s(R.string.ui_use_at_most_64_utf_8_bytes_without_control_characters));return;}hideKeyboard();prepare(s(R.string.operation_rename),selectedProfile,value);}),28);add(action(s(R.string.ui_cancel),false,()->{screen=3;navigationSession++;render();}),8);}
+  private void renameScreen(){if(detailProfile==null)return;add(text(cardLabel()+s(R.string.ui_eid_156)+inventory.optString("eidMasked",s(R.string.ui_not_reported)),12,MUTED,false),18);add(text(profileName(detailProfile)+" · "+selectedIccid),22);EditText name=input(s(R.string.ui_nickname),false);name.setText(detailProfile.optString("nickname",""));add(name,22);add(text(s(R.string.ui_leave_blank_to_use_the_operator_name),12,MUTED,false),10);add(action(s(R.string.ui_save),true,()->{if(!detailCurrent())return;String value=name.getText().toString().trim();if(value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>64||value.matches("(?s).*[\\p{Cntrl}].*")){name.setError(s(R.string.ui_use_at_most_64_utf_8_bytes_without_control_characters));return;}hideKeyboard();prepare("rename",selectedProfile,value);}),28);add(action(s(R.string.ui_cancel),false,()->{screen=3;navigationSession++;render();}),8);}
   private void recordsScreen(){add(text(s(R.string.ui_operation_results),22,TEXT,false),24);add(text(s(R.string.ui_this_session_s_results_are_shown_here_durable_safety_records_rem)),12);for(String value:recentResults)add(text(value,16,TEXT,false),18);if(recentResults.isEmpty())add(text(s(R.string.ui_no_operations_in_this_app_session)),24);add(action(s(R.string.ui_verify_card_and_recovery),false,this::reconcile),24);add(action(s(R.string.ui_export_safe_diagnostics),false,this::exportDiagnostics),12);}
   private void connectionScreen(){
     add(text(s(R.string.ui_connect_with_adb),28,TEXT,false),28);
@@ -1223,6 +1223,7 @@ public final class MainActivity extends Activity {
   }
 
   private void chooseCrashReporting() {
+    if (!SafeTelemetry.configured(this)) {status(s(R.string.ui_feedback_30),s(R.string.ui_feedback_31));return;}
     boolean enabled = SafeTelemetry.allowed(this);
     new AlertDialog.Builder(this)
         .setTitle(s(R.string.ui_feedback_12))

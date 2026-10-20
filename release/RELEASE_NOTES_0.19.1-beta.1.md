@@ -11,9 +11,11 @@ APK: `0.19.1-beta.1` · versionCode **46** · ARM64 Android 9+ installation. Car
 - Explain paused access, changed cards, unstable inventory and unverifiable recovery evidence, instead of treating these conditions as an unavailable card. A failed verification no longer claims the card was read successfully.
 - Preserve real Binder caller authentication across nested journal checks while HAL work executes as Shell. Explicit recovery windows retain artifact verification and single-use handoff; an already connected ordinary rerun remains idempotent.
 
+- Include the already-merged privacy-first feedback/export feature, with Chinese UI. Crash reporting remains off by default. This APK has no reporting DSN: remote submission is unavailable; manual email/export remain available. No feedback is sent during device validation.
+
 ## Validation at publication
 
-Source review, release build/lint, 35 recovery assertions, 39 actual-provider authentication/state assertions, 332 compatibility/safety assertions, 68 UI/command assertions and 434-pair localization coverage passed. Lint findings are disclosed in the readiness record. Signing and corresponding-source payload verification accompany the Release.
+Source review, release build/lint, 35 recovery assertions, 39 actual-provider authentication/state assertions, 332 compatibility/safety assertions, 68 UI/command assertions and 477-pair localization coverage passed. Lint findings are disclosed in the readiness record. Signing and corresponding-source payload verification accompany the Release.
 
 **The owner requested publication before testing this exact APK on the phone.** Version-46 device installation, connection, fresh card/Profile reading, recovery and language UI results are pending at publication; any later result must identify this downloaded APK and device. Earlier candidates do not qualify this release. No exact-build Profile writes have been tested or authorized in this validation round.
 

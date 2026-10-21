@@ -131,7 +131,7 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
     @Override public void close() {
         if(channel>0 && hal!=null){
             try {hal.closeChannel(channel);}
-            catch(Exception channelAlreadyGone){ channel=-1; }
+            catch(Exception cleanupFailure){CardTransactionLock.quarantine();}
         }
         channel=-1;
     }

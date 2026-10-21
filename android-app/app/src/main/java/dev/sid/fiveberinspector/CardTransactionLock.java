@@ -46,6 +46,13 @@ public final class CardTransactionLock {
  }
  /** Keep exclusion until service restart when a native writer cannot be confirmed stopped. */
  public static synchronized void quarantine(){if(owner!=Thread.currentThread())throw new SecurityException("Transaction owner required");if(quarantined)return;quarantined=true;
+  // DIAGNOSTIC ONLY: record which call site latched the quarantine. No card, profile or
+  // credential data is involved; this names an internal source file and line.
+  try {StackTraceElement[] s=new Throwable().getStackTrace();
+       for(StackTraceElement f:s) if(f.getClassName().startsWith("dev.sid.fiveberinspector.")
+           && !f.getClassName().endsWith("CardTransactionLock"))
+           android.util.Log.w("EightberQuarantine","latched at "+f.getFileName()+":"+f.getLineNumber());
+  } catch(Throwable ignored){}
   try(FileChannel marker=FileChannel.open(quarantineFile,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS)) {
    Files.setPosixFilePermissions(quarantineFile,PosixFilePermissions.fromString("rw-------"));
    marker.write(java.nio.ByteBuffer.wrap("worker_termination_unconfirmed\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII)));marker.force(true);

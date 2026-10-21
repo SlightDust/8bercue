@@ -10,8 +10,8 @@ android {
         applicationId 'dev.sid.fiveberinspector'
         minSdk 28
         targetSdk 36
-        versionCode 51
-        versionName '0.19.1-beta.3-postflight2'
+        versionCode 52
+        versionName '0.19.1-beta.3-postflight3'
         manifestPlaceholders = [glitchtipDsn: providers.gradleProperty('glitchtipDsn').orElse('').get()]
     }
 

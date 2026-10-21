@@ -10,6 +10,14 @@ public final class PortableProfileLifecycle {
  private static final class Plan {
   String token,reader,hash,identityHash,digest,id,nickname;long created;ProfileLifecycleGuard.Operation op;
  }
+ /** Observation budget for the post-REFRESH read-only settling loop. A REFRESH can keep
+  * the card silent for tens of seconds, and a full inventory read costs several seconds
+  * on slow readers, so this is a wall-clock budget covering many reads. */
+ private static final long POSTFLIGHT_BUDGET_MS=150_000L;
+ /** Extra wall clock granted to the supervisor beyond the loop's own deadline so a
+  * read already in flight can finish before the worker is cancelled. */
+ private static final long POSTFLIGHT_OVERRUN_MS=30_000L;
+ private static final long POSTFLIGHT_SHUTDOWN_MS=5_000L;
  private PortableProfileLifecycle(){}
  private static void shell(){if(android.os.Process.myUid()!=android.os.Process.SHELL_UID)throw new SecurityException("Shell UserService required");}
  static List<ProfileLifecycleGuard.Row> rows(List<CardProfileInventory.Entry> entries){List<ProfileLifecycleGuard.Row> r=new ArrayList<>();for(CardProfileInventory.Entry p:entries)r.add(new ProfileLifecycleGuard.Row(p.iccid,p.enabled,p.nickname,p.provider,p.name));return r;}
@@ -55,9 +63,13 @@ public final class PortableProfileLifecycle {
    // Explicitly confirmed active disable submits one command; zero-active readback is required.
    try{PhoneProfileLifecycle.execute(p.op,p.id,p.nickname,p.reader,p.hash,submitted);nativeCompleted=true;}catch(Exception ignored){}
    if(CardTransactionLock.isQuarantined())return new JSONObject().put("ok",false).put("verified",false).put("status","unknown").put("reviewRequired",true).put("cardReadRequired",true).put("restartRequired",true);
+   // A REFRESH can keep the card silent for tens of seconds. Each full inventory read
+   // costs seconds on slow readers, so the observation window is a wall-clock budget
+   // sized to cover many reads rather than a fixed count that a slow card exhausts.
+   long postflightDeadline=System.currentTimeMillis()+POSTFLIGHT_BUDGET_MS;
    DownloadWorkerSupervisor.Outcome<LifecyclePostflight.Result> postflight=DownloadWorkerSupervisor.run(
-       ()->LifecyclePostflight.observe(p.op,before,p.id,p.nickname,()->{verifyIdentity(p);return rows(CardProfileInventory.list());},Thread::sleep),
-       ()->{},25_000L,3_000L);
+       ()->LifecyclePostflight.observe(p.op,before,p.id,p.nickname,()->{verifyIdentity(p);return rows(CardProfileInventory.list());},Thread::sleep,postflightDeadline),
+       ()->{},POSTFLIGHT_BUDGET_MS+POSTFLIGHT_OVERRUN_MS,POSTFLIGHT_SHUTDOWN_MS);
    if(!postflight.workerStopped)CardTransactionLock.quarantine();
    if(postflight.result!=null){verified=postflight.result.verified;unchanged=postflight.result.unchanged;}
    // REFRESH can temporarily remove the HAL channel or expose an intermediate inventory.

@@ -123,10 +123,15 @@ public final class ScopedLifecycleHalBridge implements AutoCloseable {
         }
     }
     public boolean wasSubmitted() {return consumed;}
+    /** Channel cleanup is best effort. A REFRESH legitimately tears the logical channel down,
+     * so closeChannel routinely fails after a switch that the card actually executed. That is
+     * not evidence of a surviving writer: the ES10c command is a single synchronous APDU, and
+     * the native worker's termination is verified separately by PhoneProfileLifecycle. Judging
+     * the outcome belongs to the independent readback, not to this cleanup call. */
     @Override public void close() {
         if(channel>0 && hal!=null){
             try {hal.closeChannel(channel);}
-            catch(Exception cleanupFailure){CardTransactionLock.quarantine();}
+            catch(Exception channelAlreadyGone){ channel=-1; }
         }
         channel=-1;
     }

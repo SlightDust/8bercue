@@ -11,6 +11,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
     steps:
       - uses: actions/checkout@v4
 
@@ -20,23 +23,38 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK platform 36 and build-tools
+      # Install command-line tools directly instead of relying on a third-party setup
+      # action, so a transient failure in that action cannot block the build.
+      - name: Install Android command-line tools
         run: |
-          sdkmanager --install "platforms;android-36" "build-tools;35.0.0" | tail -5
+          set -euo pipefail
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          cd "$ANDROID_HOME/cmdline-tools"
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+            -o tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q tools.zip
+          mv cmdline-tools latest
+          rm tools.zip
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
+
+      - name: Install platform 36 and build-tools 35
+        run: |
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools"
 
       - name: Decode signing keystore
         env:
           KEYSTORE_B64: ${{ secrets.FIVEBER_KEYSTORE_B64 }}
         run: |
-          if [ -z "$KEYSTORE_B64" ]; then
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
             echo "::error::FIVEBER_KEYSTORE_B64 secret is not set"; exit 1
           fi
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          ls -l "$RUNNER_TEMP/release.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          test -s "$RUNNER_TEMP/release.jks"
 
       - name: Build release APK
         env:
@@ -46,11 +64,10 @@ jobs:
           FIVEBER_RELEASE_KEY_PASSWORD: ${{ secrets.FIVEBER_KEY_PASSWORD }}
         run: |
           chmod +x android-app/gradlew
-          android-app/gradlew -p android-app :app:assembleRelease --console=plain --no-daemon
+          android-app/gradlew -p android-app :app:assembleRelease --console=plain --no-daemon --stacktrace
 
       - name: Show outputs
-        run: |
-          find android-app/app/build/outputs -name '*.apk' -exec ls -l {} \;
+        run: find android-app/app/build/outputs -name '*.apk' -exec ls -l {} \;
 
       - name: Verify signed artifact
         run: |
